@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "dark-slide"
+name = "fancy-dark-slide"
 version = "0.1.0"
 description = "Zero-dependency pptx writer + reader for agentic deck creation. The Python mirror of PHP particle-academy/dark-slide and Node @particle-academy/dark-slide."
 readme = "README.md"

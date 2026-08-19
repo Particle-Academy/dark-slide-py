@@ -130,7 +130,7 @@ The same deck, three backends:
 
 | | PHP | Node / TypeScript | Python |
 |---|---|---|---|
-| install | `composer require particle-academy/dark-slide` | `npm i @particle-academy/dark-slide` | `pip install dark-slide` |
+| install | `composer require particle-academy/dark-slide` | `npm i @particle-academy/dark-slide` | `pip install fancy-dark-slide` |
 | import | `use DarkSlide\Agent;` | `import { Agent } from "@particle-academy/dark-slide"` | `import dark_slide` |
 | validate | `Agent::validate($deck)` | `Agent.validate(deck)` | `dark_slide.validate(deck)` |
 | repair | `Agent::validateAndRepair($deck)` | `Agent.validateAndRepair(deck)` | `dark_slide.validate_and_repair(deck)` |
