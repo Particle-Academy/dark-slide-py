@@ -216,4 +216,20 @@ class Validator:
                         )
                     )
 
+            elif element_type in ("kpiBand", "metadataGrid"):
+                # An items-less composite is not an error the writer can see: it
+                # expands to a table with no rows and renders as a blank
+                # rectangle, which is the worst kind of wrong.
+                items = element.get("items")
+                if not isinstance(items, list) or not items:
+                    errors.append(
+                        _err(
+                            f"{path}/items",
+                            "non-empty array",
+                            gettype(items),
+                            items,
+                            f"A `{element_type}` must have a non-empty `items` array.",
+                        )
+                    )
+
         return errors

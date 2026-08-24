@@ -691,3 +691,31 @@ DECKS["escapingAndLoose"] = {
         }
     ],
 }
+
+
+def _reference_deck() -> dict[str, Any] | None:
+    """The rich-constructs reference deck, loaded from the PHP repository.
+
+    It is the acceptance artifact for the whole trio — a nine-slide deck built
+    from the construct classes of a real paginated business document (metadata
+    grid, KPI band, accent-bar callouts, tables with a highlighted total row,
+    check-mark lists, a three-column comparison). Copying it into each repo
+    would give three fixtures that drift; this resolves the same file the PHP
+    sources are resolved from, so all three engines are compared on identical
+    input.
+    """
+    import json
+    import os
+    from pathlib import Path
+
+    override = os.environ.get("DARK_SLIDE_PHP_SRC")
+    src_root = Path(override) if override else Path(__file__).resolve().parents[2] / "dark-slide" / "src"
+    path = src_root.parent / "tests" / "fixtures" / "reference-deck.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+_REFERENCE = _reference_deck()
+if _REFERENCE is not None:
+    DECKS["richConstructsReference"] = _REFERENCE

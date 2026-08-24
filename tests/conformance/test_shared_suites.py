@@ -33,7 +33,11 @@ from dark_slide.helpers.emu import php_round
 from dark_slide.helpers.markdown_inline import tokenize
 from tests.conformance import loader
 
-PINNED_SUITE_VERSION = "0.5.0"
+# Moved from 0.5.0 with the release that adds `dark-slide/table-cell-model`.
+# The pin was ALREADY stale before that suite existed — fancy-conformance had
+# shipped 0.6.0 and this file still said 0.5.0, so the one test whose job is to
+# notice a fixture set moving underneath the port was the test failing.
+PINNED_SUITE_VERSION = "0.7.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk() -> None:

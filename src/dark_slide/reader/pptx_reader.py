@@ -508,15 +508,36 @@ class PptxReader:
         if not rows:
             return None
 
+        # Whether row 0 is a header is DECLARED, not assumed. `a:tblPr/@firstRow`
+        # is the only thing that says so, and header-less tables are ordinary
+        # now — every metadataGrid and kpiBand is one. Assuming a header
+        # promoted a row of DATA to column labels and dropped it from the rows,
+        # silently losing content on the way back in.
+        tbl_pr = _descendant(tbl, "tblPr")
+        has_header = tbl_pr is not None and (_at(tbl_pr, "firstRow") or "0") == "1"
+
+        # Column widths come from the grid, as fractions of the table, so a
+        # table written with unequal columns reads back with them.
+        grid_widths = [_to_int(_at(c, "w")) for c in _descendants(tbl, "gridCol")]
+        grid_total = sum(grid_widths)
+
+        first_cells = _descendants(rows[0], "tc")
+        column_count = max(len(first_cells), len(grid_widths))
+
         # Column KEYS are synthesised (`col1`, `col2`, …) — the source deck's
         # keys are not in the file, only the labels are.
-        columns = [
-            {"key": f"col{i + 1}", "label": self._cell_text(cell)}
-            for i, cell in enumerate(_descendants(rows[0], "tc"))
-        ]
+        columns: list[dict[str, Any]] = []
+        for i in range(column_count):
+            column: dict[str, Any] = {
+                "key": f"col{i + 1}",
+                "label": self._cell_text(first_cells[i]) if has_header and i < len(first_cells) else "",
+            }
+            if grid_total > 0 and i < len(grid_widths):
+                column["width"] = grid_widths[i] / grid_total
+            columns.append(column)
 
         body_rows: list[dict[str, str]] = []
-        for row in rows[1:]:
+        for row in rows[0 if not has_header else 1 :]:
             row_cells = _descendants(row, "tc")
             row_data: dict[str, str] = {}
             for i, col in enumerate(columns):

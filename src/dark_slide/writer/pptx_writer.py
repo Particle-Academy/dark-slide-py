@@ -51,6 +51,8 @@ from ..helpers import syntax_highlighter as SyntaxHighlighter
 from ..helpers import xml as Xml
 from ..helpers.chart_translator import ChartSpec, translate as translate_chart
 from ..helpers.emu import php_round
+from ..table import composites, table_resolver
+from ..text import box_decoration
 from ..schema.schema import Schema
 from ..util import (
     is_numeric,
@@ -96,6 +98,12 @@ _FIXED_ZIP_DATE = (1980, 1, 1, 0, 0, 0)
 _DATA_URI = re.compile(r"^data:([^;,]+)(?:;base64)?,([\s\S]*)$")
 _HTTP_URL = re.compile(r"^https?://", re.IGNORECASE)
 _CNVPR = re.compile(r"<p:cNvPr\b([^>]*)/>")
+
+#: ``anchor`` on ``<a:tcPr>`` — the vertical anchor of a table cell.
+_ANCHOR_ATTR = {"top": "t", "middle": "ctr", "bottom": "b"}
+
+#: ``algn`` on ``<a:pPr>``.
+_ALIGN_ATTR = {"left": "l", "center": "ctr", "right": "r", "justify": "just"}
 
 _GRADIENT = re.compile(r"^linear-gradient\((.+)\)\s*;?\s*$", re.IGNORECASE)
 _DIRECTION_LIKE = re.compile(r"^(?:to\s+|[-+]?[0-9.]+(?:deg|rad|turn|grad)?\s*$)", re.IGNORECASE)
@@ -143,6 +151,8 @@ class PptxWriter:
         self._media_files: list[tuple[str, bytes]] = []
         self._chart_files: list[tuple[str, str]] = []
         self._theme_accent = "8B5CF6"
+        #: The deck's theme, kept whole so the table resolver can read its colours.
+        self._deck_theme: dict[str, Any] = {}
         self._tn_id = 0
         self._pending_slide_rels: dict[int, list[dict[str, str]]] = {}
 
@@ -176,6 +186,7 @@ class PptxWriter:
         self._theme_accent = Color.parse(
             accent if isinstance(accent, str) else "#8B5CF6", "8B5CF6"
         )[0]
+        self._deck_theme = theme
 
         slides_value = _get(deck, "slides", [])
         slides: list[Any] = slides_value if isinstance(slides_value, list) else []
@@ -1101,6 +1112,12 @@ class PptxWriter:
         self, element: dict[str, Any], shape_id: int, slide_number: int
     ) -> tuple[str, list[dict[str, str]]]:
         rels: list[dict[str, str]] = []
+
+        # Composites are authoring sugar: they become an ordinary `table`
+        # element here, before anything is serialised. See table/composites.
+        if composites.is_composite(element.get("type")):
+            element = composites.expand(element, self._deck_theme)
+
         element_type = element.get("type")
         if element_type == "text":
             xml = self._build_text_shape(element, shape_id)
@@ -1159,12 +1176,16 @@ class PptxWriter:
     def _build_text_shape(self, element: dict[str, Any], shape_id: int) -> str:
         xfrm = self._xfrm_from_fractions(element)
         style = element.get("style")
+        style_dict = style if is_plain_object(style) else {}
         body = self._build_text_body(
             php_string(_get(element, "content", "")),
-            style if is_plain_object(style) else {},
+            style_dict,
             php_string(_get(element, "format", "plain")),
         )
         element_id = _get(element, "id", f"text-{shape_id}")
+
+        width_emu = Emu.from_frac_x(php_float(_get(element, "w", 0.8)))
+        height_emu = Emu.from_frac_y(php_float(_get(element, "h", 0.2)))
 
         return (
             "<p:sp>"
@@ -1175,8 +1196,7 @@ class PptxWriter:
             "</p:nvSpPr>"
             "<p:spPr>"
             f"{xfrm}"
-            '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-            "<a:noFill/>"
+            f"{box_decoration.sp_pr(style_dict, width_emu, height_emu)}"
             "</p:spPr>"
             f"{body}"
             "</p:sp>"
@@ -1315,14 +1335,41 @@ class PptxWriter:
         fill_hex, fill_alpha = Color.parse(
             _str_or(element.get("fill"), "rgba(139,92,246,0.15)"), "8B5CF6"
         )
-        stroke_hex = Color.parse(_str_or(element.get("stroke"), "#8B5CF6"), "8B5CF6")[0]
-        stroke_width_emu = Emu.from_pt(php_float(_get(element, "strokeWidth", 2)))
+        stroke_hex, stroke_alpha = Color.parse(_str_or(element.get("stroke"), "#8B5CF6"), "8B5CF6")
+        stroke_width = php_float(_get(element, "strokeWidth", 2))
+        stroke_width_emu = Emu.from_pt(stroke_width)
         dash = '<a:prstDash val="dash"/>' if php_truthy(element.get("dashed")) else ""
 
         fill_xml = (
             "<a:noFill/>"
             if fill_alpha == 0
             else f'<a:solidFill><a:srgbClr val="{fill_hex}"><a:alpha val="{fill_alpha}"/></a:srgbClr></a:solidFill>'
+        )
+
+        # "No outline" has to be sayable. `<a:ln w="0">` is a HAIRLINE in every
+        # renderer tested, not an absence, so a zero width or a transparent
+        # stroke has to become an explicit `<a:noFill/>` — otherwise every
+        # composed callout carries a thin border nobody asked for.
+        ln_xml = (
+            "<a:ln><a:noFill/></a:ln>"
+            if stroke_width <= 0 or stroke_alpha == 0
+            else f'<a:ln w="{stroke_width_emu}"><a:solidFill><a:srgbClr val="{stroke_hex}"/></a:solidFill>{dash}</a:ln>'
+        )
+
+        # A shape carrying `content` gets a real text body. Before this it was
+        # always an empty `<a:endParaRPr/>`, so a labelled shape was two
+        # elements the author had to keep aligned by hand.
+        content = php_string(_get(element, "content", ""))
+        shape_style = element.get("style")
+        shape_style = shape_style if is_plain_object(shape_style) else {}
+        tx_body = (
+            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>'
+            if content == ""
+            else self._build_text_body(
+                content,
+                {"align": "center", "verticalAlign": "middle", **shape_style},
+                php_string(_get(element, "format", "plain")),
+            )
         )
 
         return (
@@ -1336,9 +1383,9 @@ class PptxWriter:
             f"{xfrm}"
             f'<a:prstGeom prst="{prst}"><a:avLst/></a:prstGeom>'
             f"{fill_xml}"
-            f'<a:ln w="{stroke_width_emu}"><a:solidFill><a:srgbClr val="{stroke_hex}"/></a:solidFill>{dash}</a:ln>'
+            f"{ln_xml}"
             "</p:spPr>"
-            '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>'
+            f"{tx_body}"
             "</p:sp>"
         )
 
@@ -1398,47 +1445,35 @@ class PptxWriter:
         )
 
     def _build_table(self, element: dict[str, Any], shape_id: int) -> str:
-        columns = _as_sequence(element.get("columns"))
-        rows = _as_sequence(element.get("rows"))
-        if not columns:
+        columns_raw = _as_sequence(element.get("columns"))
+        if not columns_raw:
             return self._build_placeholder("[table: no columns]", element, shape_id)
 
+        table = table_resolver.resolve(element, self._deck_theme)
+
         total_width_emu = Emu.from_frac_x(php_float(_get(element, "w", 0.5)))
-        col_count = len(columns)
-        col_width_emu = int(php_round(total_width_emu / max(1, col_count)))
+        widths = table_resolver.column_widths_emu(table["columns"], total_width_emu)
 
-        # Approximate row heights: 40pt header, 30pt body.
-        header_row_h = Emu.from_pt(40)
-        body_row_h = Emu.from_pt(30)
+        grid_cols = "".join(f'<a:gridCol w="{w}"/>' for w in widths)
 
-        grid_cols = f'<a:gridCol w="{col_width_emu}"/>' * col_count
-
-        header_cells = ""
-        for col in columns:
-            col_dict = _dict(col)
-            label = php_string(_get(col_dict, "label", _get(col_dict, "key", "")))
-            header_cells += self._build_table_cell(label, True)
-        header_row = f'<a:tr h="{header_row_h}">{header_cells}</a:tr>'
-
-        body_rows = ""
-        row_index = 0
-        for row in rows:
-            if not isinstance(row, (dict, list)):
-                continue
-            row_dict = _dict(row)
-            cells = ""
-            for col in columns:
-                key = php_string(_get(_dict(col), "key", ""))
-                value = row_dict.get(key)
-                if value is None:
-                    value = ""
-                text = php_string(value) if is_scalar(value) else php_json_encode(value)
-                cells += self._build_table_cell(text, False, row_index % 2 == 1)
-            body_rows += f'<a:tr h="{body_row_h}">{cells}</a:tr>'
-            row_index += 1
+        rows_xml = ""
+        for row in table["rows"]:
+            cells = "".join(self._build_table_cell(cell) for cell in row["cells"])
+            rows_xml += f'<a:tr h="{Emu.from_pt(php_float(row["height"]))}">{cells}</a:tr>'
 
         xfrm = self._xfrm_from_fractions(element)
         element_id = _get(element, "id", f"table-{shape_id}")
+
+        # "No Style, No Grid". Every fill and every rule is now stated per cell,
+        # so a built-in table style is not a default to fall back on — it is a
+        # second opinion layered on top of ours. The old id was Medium Style 2
+        # Accent 1, whose banding fought the striping below it.
+        first_row = ' firstRow="1"' if table["hasHeader"] else ""
+        tbl_pr = (
+            f"<a:tblPr{first_row}>"
+            "<a:tableStyleId>{2D5ABB26-0587-4C30-8999-92F81FD0307C}</a:tableStyleId>"
+            "</a:tblPr>"
+        )
 
         return (
             "<p:graphicFrame>"
@@ -1451,40 +1486,105 @@ class PptxWriter:
             '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
             '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">'
             "<a:tbl>"
-            '<a:tblPr firstRow="1" bandRow="1"><a:tableStyleId>{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}</a:tableStyleId></a:tblPr>'
+            f"{tbl_pr}"
             f"<a:tblGrid>{grid_cols}</a:tblGrid>"
-            f"{header_row}"
-            f"{body_rows}"
+            f"{rows_xml}"
             "</a:tbl>"
             "</a:graphicData>"
             "</a:graphic>"
             "</p:graphicFrame>"
         )
 
-    def _build_table_cell(self, text: str, header: bool, striped: bool = False) -> str:
-        if header:
-            fill = '<a:solidFill><a:srgbClr val="8B5CF6"/></a:solidFill>'
-            text_color = "FFFFFF"
-            bold = ' b="1"'
-        else:
-            fill = (
-                '<a:solidFill><a:srgbClr val="F8FAFC"/></a:solidFill>' if striped else "<a:noFill/>"
+    def _build_table_cell(self, cell: dict[str, Any]) -> str:
+        """Serialise one resolved cell. Makes no styling decisions.
+
+        Three things in here are load-bearing and easy to get wrong:
+
+        - ``gridSpan`` / ``rowSpan`` / ``hMerge`` / ``vMerge`` are attributes of
+          ``<a:tc>``, NOT of ``<a:tcPr>``. On ``tcPr`` they parse fine and are
+          silently ignored, so the table renders unmerged with no error.
+        - ``<a:tcPr>`` has a FIXED child order: lnL, lnR, lnT, lnB, then the
+          fill. Emitting the fill first produces a file whose fill a reader
+          drops on the floor.
+        - "No border" is STATED. An absent ``<a:lnL>`` is an UNSPECIFIED rule,
+          not an absent one, and a reader supplies its own.
+        """
+        attrs = ""
+        if cell["colSpan"] > 1:
+            attrs += f' gridSpan="{cell["colSpan"]}"'
+        if cell["rowSpan"] > 1:
+            attrs += f' rowSpan="{cell["rowSpan"]}"'
+        if cell["merged"] in ("horizontal", "both"):
+            attrs += ' hMerge="1"'
+        if cell["merged"] in ("vertical", "both"):
+            attrs += ' vMerge="1"'
+
+        pad = cell["padding"]
+        tc_pr_attrs = (
+            f' marL="{Emu.from_pt(php_float(pad["left"]))}"'
+            f' marR="{Emu.from_pt(php_float(pad["right"]))}"'
+            f' marT="{Emu.from_pt(php_float(pad["top"]))}"'
+            f' marB="{Emu.from_pt(php_float(pad["bottom"]))}"'
+            f' anchor="{_ANCHOR_ATTR[cell["anchor"]]}"'
+        )
+
+        borders = ""
+        for side, suffix in (("left", "L"), ("right", "R"), ("top", "T"), ("bottom", "B")):
+            spec = cell["borders"].get(side)
+            if spec is None:
+                borders += f"<a:ln{suffix}><a:noFill/></a:ln{suffix}>"
+                continue
+            borders += (
+                f'<a:ln{suffix} w="{Emu.from_pt(php_float(spec["width"]))}" cap="flat" cmpd="sng" algn="ctr">'
+                f'<a:solidFill><a:srgbClr val="{spec["color"]}"/></a:solidFill>'
+                f'<a:prstDash val="{spec["style"]}"/>'
+                f"</a:ln{suffix}>"
             )
-            text_color = "0F172A"
-            bold = ""
+
+        fill = (
+            "<a:noFill/>"
+            if cell["fill"] is None
+            else f'<a:solidFill><a:srgbClr val="{cell["fill"]}"/></a:solidFill>'
+        )
 
         return (
-            "<a:tc>"
+            f"<a:tc{attrs}>"
             "<a:txBody>"
-            '<a:bodyPr wrap="square" anchor="ctr" lIns="91440" tIns="45720" rIns="91440" bIns="45720"/>'
+            "<a:bodyPr/>"
             "<a:lstStyle/>"
-            f'<a:p><a:pPr algn="l"/><a:r><a:rPr lang="en-US" sz="1400"{bold}>'
-            f'<a:solidFill><a:srgbClr val="{text_color}"/></a:solidFill></a:rPr>'
-            f"<a:t>{Xml.text(text)}</a:t></a:r></a:p>"
+            f'<a:p><a:pPr algn="{_ALIGN_ATTR[cell["align"]]}"/>'
+            f"{self._build_cell_run(cell)}"
+            "</a:p>"
             "</a:txBody>"
-            f"<a:tcPr>{fill}</a:tcPr>"
+            f"<a:tcPr{tc_pr_attrs}>{borders}{fill}</a:tcPr>"
             "</a:tc>"
         )
+
+    def _build_cell_run(self, cell: dict[str, Any]) -> str:
+        sz = Emu.hundredths_of_point(php_float(cell["fontSize"]))
+        r_pr = f'<a:rPr lang="en-US" sz="{sz}"'
+        if cell["bold"]:
+            r_pr += ' b="1"'
+        if cell["italic"]:
+            r_pr += ' i="1"'
+        if cell["underline"]:
+            r_pr += ' u="sng"'
+        if php_float(cell["letterSpacing"]) != 0.0:
+            r_pr += f' spc="{Emu.hundredths_of_point(php_float(cell["letterSpacing"]))}"'
+        if cell["caps"] != "none":
+            r_pr += f' cap="{cell["caps"]}"'
+        r_pr += ">"
+        r_pr += f'<a:solidFill><a:srgbClr val="{cell["color"]}"/></a:solidFill>'
+        if cell["fontFamily"] is not None:
+            r_pr += f'<a:latin typeface="{Xml.attr(php_string(cell["fontFamily"]))}"/>'
+        r_pr += "</a:rPr>"
+
+        # An empty run is legal but PowerPoint prefers an endParaRPr for a
+        # genuinely empty cell — and a merged continuation cell is always one.
+        if cell["text"] == "":
+            return f'<a:endParaRPr lang="en-US" sz="{sz}"/>'
+
+        return f'<a:r>{r_pr}<a:t>{Xml.text(php_string(cell["text"]))}</a:t></a:r>'
 
     # ── Charts ────────────────────────────────────────────────────────────
 
@@ -1902,6 +2002,9 @@ class PptxWriter:
         )
 
         render_runs = fmt == "markdown"
+        spacing = self._paragraph_spacing(style)
+        bullet = self._bullet_markup(style.get("bullet"))
+        run_extra = self._run_extra_attrs(style)
 
         paragraphs = ""
         for line in content.split("\n"):
@@ -1922,10 +2025,9 @@ class PptxWriter:
                 paragraph_bold = ' b="1"'
 
             p_pr = f'<a:pPr algn="{align}"'
-            if is_bullet:
-                p_pr += ' indent="-228600" marL="228600"><a:buFont typeface="Arial"/><a:buChar char="•"/>'
-            else:
-                p_pr += "><a:buNone/>"
+            p_pr += ' indent="-228600" marL="228600">' if is_bullet else ">"
+            p_pr += spacing
+            p_pr += bullet if is_bullet else "<a:buNone/>"
             p_pr += "</a:pPr>"
 
             runs = ""
@@ -1942,6 +2044,7 @@ class PptxWriter:
                         token["b"],
                         token["i"],
                         token["code"],
+                        run_extra,
                     )
             else:
                 runs = self._build_run(
@@ -1955,13 +2058,14 @@ class PptxWriter:
                     False,
                     False,
                     False,
+                    run_extra,
                 )
 
             paragraphs += f"<a:p>{p_pr}{runs}</a:p>"
 
         return (
             "<p:txBody>"
-            f'<a:bodyPr wrap="square" anchor="{anchor}" rtlCol="0"/>'
+            f'<a:bodyPr wrap="square" anchor="{anchor}" rtlCol="0"{box_decoration.body_insets(style)}/>'
             "<a:lstStyle/>"
             f"{paragraphs}"
             "</p:txBody>"
@@ -1979,6 +2083,7 @@ class PptxWriter:
         bold: bool,
         italic: bool,
         code: bool,
+        extra: str = "",
     ) -> str:
         b = ' b="1"' if bold else base_bold
         i = (' i="1"' if italic else "") or base_italic
@@ -1993,11 +2098,60 @@ class PptxWriter:
             family = '<a:latin typeface="Consolas"/>'
 
         r_pr = (
-            f'<a:rPr lang="en-US" sz="{sz}"{b}{i}{u}>'
+            f'<a:rPr lang="en-US" sz="{sz}"{b}{i}{u}{extra}>'
             f'<a:solidFill><a:srgbClr val="{run_color}"/></a:solidFill>{family}</a:rPr>'
         )
 
         return f"<a:r>{r_pr}<a:t>{Xml.text(text)}</a:t></a:r>"
+
+    def _paragraph_spacing(self, style: dict[str, Any]) -> str:
+        """``<a:lnSpc>`` / ``<a:spcBef>`` / ``<a:spcAft>`` for a paragraph.
+
+        ``lineHeight`` is a MULTIPLE (1.4 = 140%), matching CSS and the
+        fancy-slides editor; ``spaceBefore`` / ``spaceAfter`` are points. Empty
+        when the style is silent, so decks that predate this keep their bytes.
+        """
+        out = ""
+        if is_numeric(style.get("lineHeight")):
+            pct = int(php_round(php_float(style["lineHeight"]) * 100000))
+            out += f'<a:lnSpc><a:spcPct val="{pct}"/></a:lnSpc>'
+        if is_numeric(style.get("spaceBefore")):
+            out += f'<a:spcBef><a:spcPts val="{Emu.hundredths_of_point(php_float(style["spaceBefore"]))}"/></a:spcBef>'
+        if is_numeric(style.get("spaceAfter")):
+            out += f'<a:spcAft><a:spcPts val="{Emu.hundredths_of_point(php_float(style["spaceAfter"]))}"/></a:spcAft>'
+        return out
+
+    def _bullet_markup(self, bullet: Any) -> str:
+        """The bullet markup for a list paragraph.
+
+        ``none`` suppresses it, ``number`` makes an auto-numbered list, and
+        anything else is taken as the literal character — which is all a
+        check-mark list is. The default stays the round bullet the writer has
+        always emitted.
+        """
+        if bullet is None or bullet == "":
+            return '<a:buFont typeface="Arial"/><a:buChar char="•"/>'
+        if bullet == "none" or bullet is False:
+            return "<a:buNone/>"
+        if bullet == "number":
+            return '<a:buAutoNum type="arabicPeriod"/>'
+        return f'<a:buFont typeface="Arial"/><a:buChar char="{Xml.attr(php_string(bullet))}"/>'
+
+    def _run_extra_attrs(self, style: dict[str, Any]) -> str:
+        """Run attributes that apply to every run in the body.
+
+        Letter spacing and capitalisation are both ``<a:rPr>`` ATTRIBUTES, so
+        they have to be built as a string and appended rather than nested.
+        """
+        out = ""
+        if is_numeric(style.get("letterSpacing")):
+            out += f' spc="{Emu.hundredths_of_point(php_float(style["letterSpacing"]))}"'
+        caps = style.get("caps")
+        if caps == "small":
+            out += ' cap="small"'
+        elif caps in ("all", "upper"):
+            out += ' cap="all"'
+        return out
 
     def _weight_to_bold(self, weight: Any) -> str:
         if is_numeric(weight) and php_int(weight) >= 600:

@@ -17,7 +17,16 @@ class Schema:
 
     VERSION = "0.1.0"
 
-    ELEMENT_TYPES = ["text", "image", "chart", "code", "table", "shape", "embed"]
+    #: ``kpiBand`` and ``metadataGrid`` are COMPOSITES: they expand into a
+    #: ``table`` before the writer serialises anything, so they add no OOXML
+    #: surface and read back as the table they became. See ``table.composites``.
+    ELEMENT_TYPES = [
+        "text", "image", "chart", "code", "table", "shape", "embed",
+        "kpiBand", "metadataGrid",
+    ]
+
+    #: The subset of ELEMENT_TYPES that is sugar over a ``table``.
+    COMPOSITE_ELEMENT_TYPES = ["kpiBand", "metadataGrid"]
 
     #: Layout presets the writer ships parts for. Unknown layouts fall back to
     #: free placement on ``blank``.
