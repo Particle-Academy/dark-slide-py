@@ -135,6 +135,13 @@ def _get(container: Any, key: str, default: Any = None) -> Any:
     return default if value is None else value
 
 
+#: Extension uri under which the deck's mono typeface is recorded in theme1.xml.
+MONO_FONT_EXT_URI = "urn:particle-academy:dark-slide:mono-font"
+
+#: Namespace for DarkSlide's own elements inside an ``<a:ext>``.
+NS_DARK_SLIDE = "urn:particle-academy:dark-slide"
+
+
 class PptxWriter:
     """The writer. One instance per document; the counters reset per call."""
 
@@ -153,6 +160,16 @@ class PptxWriter:
         self._theme_accent = "8B5CF6"
         #: The deck's theme, kept whole so the table resolver can read its colours.
         self._deck_theme: dict[str, Any] = {}
+        #: Monospace typeface for code runs, from ``theme.fonts.mono``.
+        #:
+        #: There is no third slot in OOXML's ``<a:fontScheme>`` — a theme carries
+        #: a major and a minor font and nothing else — so unlike heading and body
+        #: this cannot ride along in theme1.xml and has to be written onto each
+        #: code run. That is why it was missed in all three engines: accepted by
+        #: every validator, published in the JSON Schema handed to an LLM as the
+        #: tool definition, named in the writers' own docstrings, and applied
+        #: nowhere.
+        self._theme_mono = "Consolas"
         self._tn_id = 0
         self._pending_slide_rels: dict[int, list[dict[str, str]]] = {}
 
@@ -187,6 +204,10 @@ class PptxWriter:
             accent if isinstance(accent, str) else "#8B5CF6", "8B5CF6"
         )[0]
         self._deck_theme = theme
+        mono = _get(_dict(_get(theme, "fonts")), "mono", "")
+        self._theme_mono = (
+            mono.strip() if isinstance(mono, str) and mono.strip() != "" else "Consolas"
+        )
 
         slides_value = _get(deck, "slides", [])
         slides: list[Any] = slides_value if isinstance(slides_value, list) else []
@@ -413,6 +434,7 @@ class PptxWriter:
         fonts = _dict(_get(theme, "fonts"))
         heading = Xml.attr(php_string(_get(fonts, "heading", "Calibri")))
         body = Xml.attr(php_string(_get(fonts, "body", "Calibri")))
+        mono = Xml.attr(self._theme_mono)
 
         palette = list(CHART_PALETTE)
         palette[0] = accent
@@ -446,6 +468,14 @@ class PptxWriter:
             + '<a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst>'
             + "</a:fmtScheme>"
             + "</a:themeElements>"
+            # The mono typeface, recorded so the READER can recognise a code run
+            # again. ``<a:fontScheme>`` has exactly two slots, so there is
+            # nowhere in a standard theme for a third font; ``<a:extLst>`` is the
+            # standard place for exactly this, and consumers that do not know the
+            # uri ignore it.
+            + f'<a:extLst><a:ext uri="{MONO_FONT_EXT_URI}">'
+            + f'<ds:monoFont xmlns:ds="{NS_DARK_SLIDE}" typeface="{mono}"/>'
+            + "</a:ext></a:extLst>"
             + "</a:theme>"
         )
 
@@ -1427,7 +1457,7 @@ class PptxWriter:
                     "<a:r>"
                     f'<a:rPr lang="en-US" sz="{sz}">'
                     f'<a:solidFill><a:srgbClr val="{token_color}"/></a:solidFill>'
-                    '<a:latin typeface="Consolas"/>'
+                    f'<a:latin typeface="{Xml.attr(self._theme_mono)}"/>'
                     "</a:rPr>"
                     f"<a:t>{Xml.text(token['text'])}</a:t>"
                     "</a:r>"
@@ -2095,7 +2125,7 @@ class PptxWriter:
             # Inline code stays a run — it just switches font and tint, so it
             # reads as code on any theme.
             run_color = "8B5CF6"
-            family = '<a:latin typeface="Consolas"/>'
+            family = f'<a:latin typeface="{Xml.attr(self._theme_mono)}"/>'
 
         r_pr = (
             f'<a:rPr lang="en-US" sz="{sz}"{b}{i}{u}{extra}>'

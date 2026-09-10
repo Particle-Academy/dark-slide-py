@@ -28,6 +28,7 @@ import re
 import time
 import xml.etree.ElementTree as ElementTree
 import zipfile
+from html import unescape
 from typing import Any
 
 from ..helpers import emu as Emu
@@ -165,6 +166,11 @@ class PptxReader:
 
     def __init__(self) -> None:
         self._current_slide_rels: dict[str, dict[str, str]] = {}
+        #: The mono typeface this deck was written with, read back from the
+        #: theme's ``<a:extLst>``. Empty when the package does not record one —
+        #: anything not written by a current DarkSlide — in which case the name
+        #: sniff below is the only signal available.
+        self._mono_typeface = ""
         self._parts: dict[str, bytes] = {}
 
     def read(self, data: bytes | bytearray | str | os.PathLike[str]) -> dict[str, Any]:
@@ -192,6 +198,23 @@ class PptxReader:
 
     # ── Extraction ────────────────────────────────────────────────────────
 
+    def _read_mono_typeface(self) -> str:
+        """The mono typeface recorded in ``theme1.xml``'s ``<a:extLst>``, or ``""``.
+
+        Deliberately a regex rather than a parse: this runs before the deck is
+        built, the element is one attribute deep, and a theme part that does not
+        carry the extension is the common case rather than an error.
+        """
+        xml = self._get_part("ppt/theme/theme1.xml")
+        if xml is None:
+            return ""
+
+        match = re.search(r'<ds:monoFont[^>]*typeface="([^"]*)"', xml)
+        if match is None:
+            return ""
+
+        return unescape(match.group(1))
+
     def _get_part(self, name: str) -> str | None:
         payload = self._parts.get(name)
         return None if payload is None else payload.decode("utf-8", "replace")
@@ -203,6 +226,8 @@ class PptxReader:
             "theme": {"name": "imported"},
             "slides": [],
         }
+
+        self._mono_typeface = self._read_mono_typeface()
 
         # Walk the presentation rel list in order — that, not the part names,
         # is what defines slide order.
@@ -599,7 +624,25 @@ class PptxReader:
                 latin = _el(r_pr, "latin")
                 if latin is not None:
                     typeface = (_at(latin, "typeface") or "").lower()
-                    if "consola" in typeface or "mono" in typeface or "courier" in typeface:
+                    # Exact match against the typeface the deck RECORDED
+                    # first, then the name sniff.
+                    #
+                    # The sniff alone was sound while the writer always emitted
+                    # Consolas. Once a deck can name its own mono font it is
+                    # not: "Fira Code" and "Cascadia" contain none of these
+                    # words, so a code run came back as plain text — a silent
+                    # downgrade on a file that opens perfectly.
+                    #
+                    # The sniff stays as the fallback, because it is the only
+                    # thing that works for a pptx written by anything else.
+                    recorded = self._mono_typeface.lower()
+
+                    if (
+                        (recorded != "" and typeface == recorded)
+                        or "consola" in typeface
+                        or "mono" in typeface
+                        or "courier" in typeface
+                    ):
                         code = True
             if text != "":
                 any_non_empty = True
@@ -611,6 +654,34 @@ class PptxReader:
 
         if not any_non_empty:
             return ("- " if is_bullet else "", is_bullet)
+
+        # Coalesce adjacent runs that carry the SAME decoration.
+        #
+        # DrawingML splits text into runs for reasons that have nothing to do
+        # with emphasis — a syntax highlighter emits one run per token, all of
+        # them code — and emitting a marker per run produces markdown that is
+        # not merely ugly but WRONG. A highlighted ``const deck = 1;`` came back
+        # as "`const`` deck = ``1``;`", where every pair of adjacent backticks
+        # closes one span and opens the next, so re-parsing it yields the
+        # inverse of the intended emphasis.
+        #
+        # Merging first is also what makes the output stable: the same text
+        # reads the same whether the writer split it into one run or six.
+        merged: list[dict[str, Any]] = []
+        for run in parsed:
+            last = merged[-1] if merged else None
+
+            if (
+                last is not None
+                and last["b"] == run["b"]
+                and last["i"] == run["i"]
+                and last["code"] == run["code"]
+            ):
+                last["text"] += run["text"]
+                continue
+
+            merged.append(dict(run))
+        parsed = merged
 
         line = ""
         any_decoration = False
