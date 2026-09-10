@@ -38,7 +38,7 @@ __all__ = [
 #: This package's own version. Note the peers' numbers differ from each other
 #: and from this one — each ships on its own registry's schedule. Feature
 #: parity is asserted by the parity suite, not by a matching number.
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 def _make_writer(options: dict[str, Any] | None) -> PptxWriter:

@@ -117,6 +117,11 @@ Six changes alter emitted bytes. Five need nothing from you; one can.
 
 ### Fixed
 
+- **`version()` reports the version the package actually ships as.** It returned
+  `0.1.0` from `0.2.0`. `test_version_is_single_sourced.py` has asserted this
+  since it was written; the release preflight is what stood at it.
+
+
 - **`theme.fonts.mono` now reaches the code it names.** It was accepted by the
   validator, published in the JSON Schema handed to an LLM as the tool
   definition, and described in the writer's own docblocks as the font code runs
