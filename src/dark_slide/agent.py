@@ -38,7 +38,32 @@ __all__ = [
 #: This package's own version. Note the peers' numbers differ from each other
 #: and from this one — each ships on its own registry's schedule. Feature
 #: parity is asserted by the parity suite, not by a matching number.
-VERSION = "0.2.0"
+def _installed_version() -> str:
+    """This package's version, read from the INSTALLED distribution metadata.
+
+    Not a literal. A literal is a second copy of a number that already lives in
+    ``pyproject.toml``, and the two drift with nothing comparing them — which is
+    the whole reason ``test_version_is_single_sourced.py`` exists. Keeping the
+    literal and pinning it with a test re-syncs the copy; reading the metadata
+    deletes it, so there is nothing left that CAN drift.
+
+    ``fancy-flow-py`` is where this stopped being theoretical: it shipped
+    ``__version__ = "0.1.0"`` against a 0.4.0 distribution for three releases,
+    and the runtime's first outside consumer installed 0.4.0 and was told 0.1.0.
+
+    The fallback covers a source tree that was never installed — a case where
+    ``pyproject.toml`` is the only truth and no distribution exists to disagree.
+    """
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _distribution_version
+
+    try:
+        return _distribution_version("fancy-dark-slide")
+    except PackageNotFoundError:  # pragma: no cover — an uninstalled source tree
+        return "0.0.0+unknown"
+
+
+VERSION = _installed_version()
 
 
 def _make_writer(options: dict[str, Any] | None) -> PptxWriter:

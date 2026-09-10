@@ -11,6 +11,11 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`VERSION` reads the INSTALLED distribution metadata instead of a literal.** The literal was corrected by hand last release and pinned by a test, which re-syncs the copy rather than removing it. Reading the metadata means there is no second number left to drift.
+
+
 ## [0.2.0] - 2026-09-10
 
 Rich document constructs: per-cell table control, decorated text boxes,
