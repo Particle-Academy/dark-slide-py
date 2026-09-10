@@ -37,7 +37,14 @@ from tests.conformance import loader
 # The pin was ALREADY stale before that suite existed — fancy-conformance had
 # shipped 0.6.0 and this file still said 0.5.0, so the one test whose job is to
 # notice a fixture set moving underneath the port was the test failing.
-PINNED_SUITE_VERSION = "0.7.0"
+#
+# Moved 0.7.0 -> 0.20.0 on 2026-09-10, deliberately and not to get to green: all
+# three tables were re-run against the checkout first and every row passes with
+# nothing skipped — shared/strings 8, shared/decimal 18,
+# dark-slide/table-cell-model 26. It had gone stale a second time in exactly the
+# way this comment already describes, which is the argument for the test rather
+# than against it.
+PINNED_SUITE_VERSION = "0.20.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk() -> None:
