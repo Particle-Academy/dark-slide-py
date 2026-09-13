@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["SchemaException"]
+__all__ = ["SchemaException", "FontEmbeddingException"]
 
 
 class SchemaException(Exception):
@@ -19,3 +19,14 @@ class SchemaException(Exception):
         super().__init__(message)
         self.message = message
         self.errors = errors
+
+
+class FontEmbeddingException(Exception):
+    """A font the host asked to embed that cannot be embedded.
+
+    Raised rather than skipped. A deck that silently leaves out a font it was
+    asked to carry renders in a substitute face on every machine without it,
+    which is the exact failure embedding exists to prevent, and nothing would
+    say so. Every problem across every supplied font is collected and raised
+    together, before anything is written.
+    """

@@ -31,9 +31,14 @@ spl_autoload_register(function (string $class): void {
 });
 
 if ($argc < 3) {
-    fwrite(STDERR, "usage: php php_tobytes.php <input.json> <out.pptx>\n");
+    fwrite(STDERR, "usage: php php_tobytes.php <input.json> <out.pptx> [options.json]\n");
     exit(2);
 }
+
+// Optional write options, e.g. {"fonts": {"Typeface": {"regular": "/path/to.ttf"}}}.
+// Font bytes go by FILE PATH: a JSON document cannot carry them faithfully, and
+// the Python side reads the same file, so both engines embed identical bytes.
+$options = $argc >= 4 ? json_decode((string) file_get_contents($argv[3]), true, 512, JSON_THROW_ON_ERROR) : [];
 
 $input = json_decode((string) file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
 
@@ -45,4 +50,4 @@ if (! class_exists(\DarkSlide\Agent::class)) {
     exit(3);
 }
 
-file_put_contents($argv[2], \DarkSlide\Agent::toBytes($input));
+file_put_contents($argv[2], \DarkSlide\Agent::toBytes($input, is_array($options) ? $options : []));

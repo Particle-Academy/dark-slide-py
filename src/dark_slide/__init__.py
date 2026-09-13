@@ -44,7 +44,7 @@ from .agent import (
     version,
     write,
 )
-from .exceptions import SchemaException
+from .exceptions import FontEmbeddingException, SchemaException
 from .reader.pptx_reader import PptxReader
 from .schema.repairer import Repairer
 from .schema.schema import Schema
@@ -72,6 +72,7 @@ __all__ = [
     "version",
     # Errors.
     "SchemaException",
+    "FontEmbeddingException",
     # Lower-level building blocks, named as in the peers.
     "Schema",
     "Validator",

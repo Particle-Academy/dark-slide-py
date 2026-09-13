@@ -172,6 +172,11 @@ class PptxReader:
         #: sniff below is the only signal available.
         self._mono_typeface = ""
         self._parts: dict[str, bytes] = {}
+        #: The slide size from ``<p:sldSz>``, so geometry comes back as fractions
+        #: of THIS slide. Every conversion used to assume 16:9 at 10in, which read
+        #: a 4:3 deck's positions back wrong.
+        self._slide_width_emu = Emu.DEFAULT_SLIDE_WIDTH
+        self._slide_height_emu = Emu.DEFAULT_SLIDE_HEIGHT
 
     def read(self, data: bytes | bytearray | str | os.PathLike[str]) -> dict[str, Any]:
         """Read from bytes OR a filesystem path.
@@ -228,6 +233,14 @@ class PptxReader:
         }
 
         self._mono_typeface = self._read_mono_typeface()
+        self._read_slide_size()
+        # 16:9 at 10in is the default and says nothing; any other shape is part
+        # of the deck and comes back as its aspect ratio.
+        if (
+            self._slide_width_emu != Emu.DEFAULT_SLIDE_WIDTH
+            or self._slide_height_emu != Emu.DEFAULT_SLIDE_HEIGHT
+        ):
+            deck["theme"]["aspectRatio"] = _php_divide(self._slide_width_emu, self._slide_height_emu)
 
         # Walk the presentation rel list in order — that, not the part names,
         # is what defines slide order.
@@ -252,7 +265,54 @@ class PptxReader:
                 self._parse_slide(slide_xml, f"imported-slide-{i + 1}", notes)
             )
 
+        # Only when the file embeds any, so every other read is unchanged.
+        embedded_fonts = self._read_embedded_fonts()
+        if embedded_fonts:
+            deck["metadata"] = {"embeddedFonts": embedded_fonts}
+
         return deck
+
+    def _read_slide_size(self) -> None:
+        self._slide_width_emu = Emu.DEFAULT_SLIDE_WIDTH
+        self._slide_height_emu = Emu.DEFAULT_SLIDE_HEIGHT
+
+        xml = self._get_part("ppt/presentation.xml")
+        tag = re.search(r"<p:sldSz\b[^>]*>", xml) if xml is not None else None
+        if tag is None:
+            return
+        cx = re.search(r'\bcx="(\d+)"', tag.group(0))
+        if cx is not None and int(cx.group(1)) > 0:
+            self._slide_width_emu = int(cx.group(1))
+        cy = re.search(r'\bcy="(\d+)"', tag.group(0))
+        if cy is not None and int(cy.group(1)) > 0:
+            self._slide_height_emu = int(cy.group(1))
+
+    def _frac_x(self, emu: int) -> float:
+        return Emu.to_frac_x(emu, self._slide_width_emu)
+
+    def _frac_y(self, emu: int) -> float:
+        return Emu.to_frac_y(emu, self._slide_height_emu)
+
+    def _read_embedded_fonts(self) -> list[dict[str, Any]]:
+        """The typefaces the file embeds and which of the four variants each
+        carries. Names and variants only, never the font bytes: a reader's output
+        is a deck, and a deck is agent-facing JSON."""
+        xml = self._get_part("ppt/presentation.xml")
+        listing = re.search(r"<p:embeddedFontLst>(.*?)</p:embeddedFontLst>", xml, re.S) if xml is not None else None
+        if listing is None:
+            return []
+
+        fonts: list[dict[str, Any]] = []
+        for entry in re.findall(r"<p:embeddedFont>(.*?)</p:embeddedFont>", listing.group(1), re.S):
+            face = re.search(r'<p:font\b[^>]*\btypeface="([^"]*)"', entry)
+            if face is None:
+                continue
+            fonts.append({
+                "typeface": unescape(face.group(1)),
+                "variants": re.findall(r"<p:(regular|bold|italic|boldItalic)\b", entry),
+            })
+
+        return fonts
 
     def _parse_slide_rels(self, rels_xml: str, slide_target_relative: str) -> dict[str, dict[str, str]]:
         """A slide's rels as ``{rId: {type, target}}`` with absolute targets."""
@@ -444,10 +504,10 @@ class PptxReader:
         c_nv_pr = _descendant(sp, "cNvPr")
         base: dict[str, Any] = {
             "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None) or _fallback_id(),
-            "x": Emu.to_frac_x(_to_int(_at(offset, "x"))),
-            "y": Emu.to_frac_y(_to_int(_at(offset, "y"))),
-            "w": Emu.to_frac_x(_to_int(_at(extent, "cx"))),
-            "h": Emu.to_frac_y(_to_int(_at(extent, "cy"))),
+            "x": self._frac_x(_to_int(_at(offset, "x"))),
+            "y": self._frac_y(_to_int(_at(offset, "y"))),
+            "w": self._frac_x(_to_int(_at(extent, "cx"))),
+            "h": self._frac_y(_to_int(_at(extent, "cy"))),
         }
 
         t_body = _descendant(sp, "txBody")
@@ -506,10 +566,10 @@ class PptxReader:
         return {
             "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None) or _fallback_id(),
             "type": "image",
-            "x": Emu.to_frac_x(_to_int(_at(offset, "x"))),
-            "y": Emu.to_frac_y(_to_int(_at(offset, "y"))),
-            "w": Emu.to_frac_x(_to_int(_at(extent, "cx"))),
-            "h": Emu.to_frac_y(_to_int(_at(extent, "cy"))),
+            "x": self._frac_x(_to_int(_at(offset, "x"))),
+            "y": self._frac_y(_to_int(_at(offset, "y"))),
+            "w": self._frac_x(_to_int(_at(extent, "cx"))),
+            "h": self._frac_y(_to_int(_at(extent, "cy"))),
             "src": src,
             "fit": "contain",
         }
@@ -576,10 +636,10 @@ class PptxReader:
             "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None)
             or _fallback_id("imported-table-"),
             "type": "table",
-            "x": Emu.to_frac_x(_to_int(_at(offset, "x"))),
-            "y": Emu.to_frac_y(_to_int(_at(offset, "y"))),
-            "w": Emu.to_frac_x(_to_int(_at(extent, "cx"))),
-            "h": Emu.to_frac_y(_to_int(_at(extent, "cy"))),
+            "x": self._frac_x(_to_int(_at(offset, "x"))),
+            "y": self._frac_y(_to_int(_at(offset, "y"))),
+            "w": self._frac_x(_to_int(_at(extent, "cx"))),
+            "h": self._frac_y(_to_int(_at(extent, "cy"))),
             "columns": columns,
             "rows": body_rows,
         }
@@ -720,3 +780,12 @@ def _num_to_str(value: float) -> str:
     if value == int(value):
         return str(int(value))
     return repr(value)
+
+
+def _php_divide(numerator: int, denominator: int) -> int | float:
+    """PHP's ``int / int``: an int when it divides exactly, a float otherwise.
+
+    The reader returns ``theme.aspectRatio`` this way, so a 2:1 slide reads back
+    as ``2`` in both engines rather than ``2`` in PHP and ``2.0`` here.
+    """
+    return numerator // denominator if numerator % denominator == 0 else numerator / denominator

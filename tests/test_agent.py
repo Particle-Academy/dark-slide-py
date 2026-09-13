@@ -306,17 +306,17 @@ def test_markdown_headings_render_larger_and_bold() -> None:
     element = deck["slides"][0]["elements"][0]
     element["content"] = "# Big heading\n## Medium\n### Small\nbody copy"
     element["format"] = "markdown"
-    # Big enough that the h3 multiplier still clears PPTX's 8pt floor.
-    element["style"] = {"fontSize": 40}
+    # 64 design px is 24pt on the default 1920 canvas.
+    element["style"] = {"fontSize": 64}
 
     xml = part(deck, "ppt/slides/slide1.xml")
     assert "<a:t>Big heading</a:t>" in xml
     assert "<a:t>Medium</a:t>" in xml
     assert "<a:t>Small</a:t>" in xml
     assert "<a:t># Big heading</a:t>" not in xml
-    # Body 40 → sz=2000; h1 is 1.8x → sz=3600.
-    assert 'sz="3600" b="1"' in xml
-    assert 'sz="2000"' in xml
+    # Body 64px → 24pt → sz=2400; h1 is 1.8x → 43.2pt → sz=4320.
+    assert 'sz="4320" b="1"' in xml
+    assert 'sz="2400"' in xml
 
 
 def test_code_blocks_get_coloured_token_runs() -> None:

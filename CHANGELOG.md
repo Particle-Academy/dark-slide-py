@@ -11,6 +11,57 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-13
+
+**BREAKING, for how big things are, not for any API.** Pre-1.0, so this lands in a minor. Ports `particle-academy/dark-slide` 0.10 exactly; the parity suite compares every part against the PHP engine byte for byte, embedded fonts included.
+
+### Changed
+
+- **BREAKING: decks are drawn at the size fancy-slides draws them.** Every length in a deck is now a design pixel on a canvas `theme.slideWidth` wide (1920 by default) and converts as `points = px × 720 / slideWidth`. `fontSize: 96` is 36pt, 5% of the slide width, which is what fancy-slides shows.
+
+  Before, `fontSize` was halved into points with an 8pt floor (96 → 48pt, a third larger than the preview) and every other length was taken as points, so one style object mixed two units. Now converted identically: `fontSize`, `strokeWidth`, `letterSpacing`, `spaceBefore`, `spaceAfter`, `padding`, `radius`, border and accent-bar widths, and table row heights. The floor is 1pt (PPTX's minimum). Built-in defaults that are PowerPoint's own (text insets, a 1pt outline, a 0.75pt table rule, minimum row heights, a 4pt accent bar) stay in points.
+
+  **What to do:** nothing, if your decks were designed in fancy-slides; they now match it. To keep a 0.2 deck's output exactly, set `theme.slideWidth: 1440` and double every length you had written in points (the list above, minus `fontSize`). Composites (`kpiBand`, `metadataGrid`) already did this to their own defaults, so at 1440 they render as before.
+
+- **The text default is 28 design px** (10.5pt), fancy-slides' own default, instead of 24.
+
+- **Code blocks take `style.fontSize`**, default 32 design px (12pt, the size they were fixed at).
+
+- **The published schema describes the design-pixel model**, including `theme.slideWidth`, `theme.aspectRatio` and element `strokeWidth`, identical to the PHP reference (`tests/test_schema_describes_style_units.py` diffs them).
+
+- **The conformance pin moved from 0.21.2 to 0.22.0**, whose `dark-slide/table-cell-model` goldens follow the new model. All three tables were re-run first: `shared/strings` 8, `shared/decimal` 18, `dark-slide/table-cell-model` 28, nothing failed or skipped, rounding ties included.
+
+### Fixed
+
+- **`theme.aspectRatio` shapes the slide.** It was validated, published in the schema and ignored, so a 4:3 deck came out stretched onto 16:9. The slide stays 10in wide; 16:9, 16:10 and 4:3 get PowerPoint's named `<p:sldSz type>`, any other ratio a custom size.
+
+- **The reader reads geometry against the file's own slide size** (`<p:sldSz>`) instead of assuming 16:9, and returns `theme.aspectRatio` for any other shape (an int when the ratio is whole, as PHP returns it). A 4:3 deck's `y` of 0.5 used to read back as 0.667.
+
+- **Rounded corners are the radius asked for.** A roundRect corner is `min(w, h) * adj / 100000` (LibreOffice's preset table); decorated text boxes divided by half the shorter side and drew every corner twice as round. `rounded-rect` shapes now take `radius` (design px, default 8) instead of PowerPoint's default corner.
+
+### Added
+
+- **Embed the host's fonts in the file**, so brand typography survives machines that do not have it installed:
+
+  ```python
+  dark_slide.write(deck, "out.pptx", {"fonts": {
+      "Bebas Neue": {"regular": "fonts/BebasNeue-Regular.ttf"},
+      "Inter": {"regular": inter_regular_bytes, "bold": pathlib.Path("fonts/Inter-Bold.ttf")},
+  }})
+  ```
+
+  Each variant (`regular`, `bold`, `italic`, `boldItalic`) is a path (`str` or `os.PathLike`) or the font's `bytes`. The deck itself never carries a font, so an agent can name a typeface but never make the writer read a file.
+
+  Written as uncompressed Embedded OpenType in `ppt/fonts/fontN.fntdata`, with `<p:embeddedFontLst>` and `embedTrueTypeFonts="1"`, byte-identical to the PHP engine. **Verified by rendering in LibreOffice 26** (the opt-in `DARK_SLIDE_RENDER=1` test); **not verified in PowerPoint or Google Slides**.
+
+  Refused, all at once and before anything is written, with `dark_slide.FontEmbeddingException` and the same text as PHP: fonts whose licence (`fsType`) forbids embedding or allows bitmaps only, CFF-outline `.otf` and `.ttc` collections, and a file whose family name is not the typeface it was supplied for.
+
+  `read()` reports embedded typefaces and variants in `metadata.embeddedFonts`, never the bytes.
+
+  **Nothing changes for a deck written without `fonts`**: same parts, same bytes.
+
+- **Parity fixtures** for the default and 1440 canvases, a 4:3 and a custom-ratio slide, rounded rectangles, and a two-typeface font embedding compared as bytes. `scripts/php_tobytes.php` takes an optional options JSON for the last.
+
 ## [0.2.1] - 2026-09-13
 
 ### Fixed

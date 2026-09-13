@@ -18,6 +18,16 @@ Precedence, which is the whole design::
 A key that is ABSENT falls through. A key present with the value ``False``
 stops the chain and means "off" — which is why this module tests key PRESENCE
 rather than truthiness in the places it does.
+
+Units
+-----
+
+Authored lengths (``fontSize``, ``letterSpacing``, ``padding``, border
+``width``, row ``height`` / ``rowHeight``) are design pixels, like every other
+length in a deck, and come out in points through
+:mod:`dark_slide.helpers.design_units`. The defaults below that are already
+points (insets, rule width, minimum row heights) stay points; only
+``DEFAULT_FONT_SIZE`` is a design-pixel default, because a text size is authored.
 """
 
 from __future__ import annotations
@@ -25,11 +35,13 @@ from __future__ import annotations
 from typing import Any
 
 from ..helpers import color as Color
+from ..helpers import design_units as DesignUnits
 from ..helpers.emu import php_round
 from ..util import is_numeric, is_plain_object, php_float, php_json_encode, php_string
 
 __all__ = ["resolve", "normalize_columns", "column_widths_emu"]
 
+#: Design pixels, like an authored ``fontSize``: 10.5pt on the default 1920 canvas.
 DEFAULT_FONT_SIZE = 28
 DEFAULT_BODY_COLOR = "#0F172A"
 DEFAULT_HEADER_COLOR = "#FFFFFF"
@@ -121,6 +133,7 @@ def resolve(element: dict[str, Any], theme: dict[str, Any] | None = None) -> dic
                     "firstCol": c == 0,
                     "lastCol": c == len(columns) - 1,
                 },
+                theme,
             )
             for c, slot in enumerate(grid_row["cells"])
         ]
@@ -128,7 +141,7 @@ def resolve(element: dict[str, Any], theme: dict[str, Any] | None = None) -> dic
         rows.append(
             {
                 "header": is_header,
-                "height": _row_height(row_source, band_style, table_style, is_header),
+                "height": _row_height(row_source, band_style, table_style, is_header, theme),
                 "cells": cells,
             }
         )
@@ -315,7 +328,7 @@ def _php_json(value: Any) -> str:
 
 
 def _resolve_cell(
-    slot: dict[str, Any], chain: list[dict[str, Any]], edges: dict[str, bool]
+    slot: dict[str, Any], chain: list[dict[str, Any]], edges: dict[str, bool], theme: Any = None
 ) -> dict[str, Any]:
     spec = slot["spec"]
     layers = [*chain, _style_keys(spec)]
@@ -335,19 +348,19 @@ def _resolve_cell(
         "fill": None if fill is False or fill is None or fill == "none" else _hex(fill, "FFFFFF"),
         "align": _align(resolved.get("align", "left")),
         "anchor": _anchor(resolved.get("anchor", "middle")),
-        "fontSize": max(1.0, php_float(resolved.get("fontSize", DEFAULT_FONT_SIZE)) / 2),
-        "letterSpacing": php_float(resolved.get("letterSpacing", 0)),
+        "fontSize": DesignUnits.font_pt(php_float(resolved.get("fontSize", DEFAULT_FONT_SIZE)), theme),
+        "letterSpacing": DesignUnits.to_pt(php_float(resolved.get("letterSpacing", 0)), theme),
         "caps": _caps(resolved.get("caps", "none")),
         "fontFamily": php_string(resolved["fontFamily"]) if resolved.get("fontFamily") is not None else None,
-        "padding": _resolve_padding(resolved.get("padding")),
-        "borders": _resolve_borders(layers, edges),
+        "padding": _resolve_padding(resolved.get("padding"), theme),
+        "borders": _resolve_borders(layers, edges, theme),
         "colSpan": int(slot["colSpan"]),
         "rowSpan": int(slot["rowSpan"]),
         "merged": slot["merged"],
     }
 
 
-def _resolve_borders(layers: list[dict[str, Any]], edges: dict[str, bool]) -> dict[str, Any]:
+def _resolve_borders(layers: list[dict[str, Any]], edges: dict[str, bool], theme: Any = None) -> dict[str, Any]:
     """Per-side border resolution. The whole point of the module, and the part
     ``last-word`` needs identically.
     """
@@ -356,7 +369,10 @@ def _resolve_borders(layers: list[dict[str, Any]], edges: dict[str, bool]) -> di
 
     for side, edge_key in sides:
         is_outer = edges[edge_key]
-        value: Any = {"width": DEFAULT_BORDER_WIDTH, "color": DEFAULT_BORDER_COLOR}
+        # No "width" here on purpose: an absent width is the DEFAULT, in points,
+        # while a stated one is design pixels. Seeding the default width would
+        # make _border_side() convert it as though authored.
+        value: Any = {"color": DEFAULT_BORDER_COLOR}
 
         for layer in layers:
             if "borders" not in layer:
@@ -383,18 +399,22 @@ def _resolve_borders(layers: list[dict[str, Any]], edges: dict[str, bool]) -> di
             if side in spec:
                 value = spec[side]
 
-        out[side] = _border_side(value)
+        out[side] = _border_side(value, theme)
 
     return out
 
 
-def _border_side(value: Any) -> dict[str, Any] | None:
+def _border_side(value: Any, theme: Any = None) -> dict[str, Any] | None:
     if value is False or value is None or value == "none":
         return None
     if not is_plain_object(value):
         return None
 
-    width = php_float(value["width"]) if is_numeric(value.get("width")) else DEFAULT_BORDER_WIDTH
+    width = (
+        DesignUnits.to_pt(php_float(value["width"]), theme)
+        if is_numeric(value.get("width"))
+        else DEFAULT_BORDER_WIDTH
+    )
     if width <= 0:
         return None
 
@@ -407,7 +427,7 @@ def _border_side(value: Any) -> dict[str, Any] | None:
     }
 
 
-def _resolve_padding(padding: Any) -> dict[str, float]:
+def _resolve_padding(padding: Any, theme: Any = None) -> dict[str, float]:
     out = {
         "left": DEFAULT_PADDING_X,
         "right": DEFAULT_PADDING_X,
@@ -416,12 +436,12 @@ def _resolve_padding(padding: Any) -> dict[str, float]:
     }
 
     if is_numeric(padding):
-        v = php_float(padding)
+        v = DesignUnits.to_pt(php_float(padding), theme)
         return {"left": v, "right": v, "top": v, "bottom": v}
     if is_plain_object(padding):
         for side in ("left", "right", "top", "bottom"):
             if is_numeric(padding.get(side)):
-                out[side] = php_float(padding[side])
+                out[side] = DesignUnits.to_pt(php_float(padding[side]), theme)
 
     return out
 
@@ -441,7 +461,11 @@ def _style_keys(source: Any) -> dict[str, Any]:
 
 
 def _row_height(
-    row_source: Any, band_style: dict[str, Any], table_style: dict[str, Any], is_header: bool
+    row_source: Any,
+    band_style: dict[str, Any],
+    table_style: dict[str, Any],
+    is_header: bool,
+    theme: Any = None,
 ) -> float:
     candidates = [
         row_source.get("height") if is_plain_object(row_source) else None,
@@ -450,7 +474,7 @@ def _row_height(
     ]
     for candidate in candidates:
         if is_numeric(candidate):
-            return php_float(candidate)
+            return DesignUnits.to_pt(php_float(candidate), theme)
     return float(DEFAULT_HEADER_HEIGHT if is_header else DEFAULT_BODY_HEIGHT)
 
 

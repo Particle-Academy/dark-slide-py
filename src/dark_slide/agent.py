@@ -14,7 +14,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .exceptions import SchemaException
+from .exceptions import FontEmbeddingException, SchemaException
+from .fonts.embedded_fonts import EmbeddedFonts
 from .reader.pptx_reader import PptxReader
 from .schema.repairer import Repairer
 from .schema.schema import Schema
@@ -67,10 +68,19 @@ VERSION = _installed_version()
 
 
 def _make_writer(options: dict[str, Any] | None) -> PptxWriter:
+    """A writer from the shared options.
+
+    ``fonts`` embeds typefaces in the file: ``{typeface: {variant: path or
+    bytes}}``, variants ``regular``, ``bold``, ``italic``, ``boldItalic``. A font
+    that cannot be embedded raises :class:`FontEmbeddingException` before
+    anything is written. See :mod:`dark_slide.fonts.embedded_fonts`.
+    """
     opts = options or {}
+    fonts = opts.get("fonts")
     return PptxWriter(
         temp_dir=opts.get("temp_dir"),
         allow_http_images=bool(opts.get("allow_http_images", False)),
+        fonts=EmbeddedFonts.from_options(fonts) if isinstance(fonts, (dict, list)) and len(fonts) > 0 else None,
     )
 
 

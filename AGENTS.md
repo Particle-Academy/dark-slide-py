@@ -142,18 +142,66 @@ three-way split. The live ones, all with tests:
 | intrinsic size of a WebP / BMP | read, so `fit: cover` crops correctly | unread, so it stretches |
 | `option.categories` with no `xAxis` | ignored (a shared wart, pinned) | same |
 
+### 9. Every length is a design pixel, converted in ONE place
+
+`helpers/design_units.to_pt()` is `px * 720 / design_width`, where `design_width`
+is `theme.slideWidth` (1920 by default) and 720 is the 10in slide in points.
+`fontSize: 96` is 36pt, 5% of the slide width in PowerPoint and fancy-slides alike.
+
+- It applies to every AUTHORED length: `fontSize` (floor 1pt), `strokeWidth`,
+  `letterSpacing`, `spaceBefore` / `spaceAfter`, `padding`, `radius` (text boxes
+  AND `rounded-rect` shapes, through the shared `round_rect_geometry`), border and
+  accent-bar widths, table row heights, and the composites' own defaults.
+- It does NOT apply to PowerPoint-native defaults nobody authored: the 7.2pt /
+  3.6pt insets, a 1pt box outline, a 0.75pt table rule, 40pt / 30pt minimum rows,
+  a 4pt accent bar, the 8pt gutter.
+- **Keep the operation order.** The default canvas lands on exact ties (1px =
+  0.375pt = 4762.5 EMU), where `php_round` and a different multiplication order
+  can disagree by one unit. `designLengths1920` in the parity fixtures and the
+  `dark-slide/table-cell-model` conformance rows pin them.
+- `theme.aspectRatio` shapes the slide height (`design_units.slide_height_emu`),
+  so every Y conversion takes `self._slide_height_emu`, never the 16:9 default;
+  the reader parses `<p:sldSz>` for the same reason.
+- A roundRect corner is `min(w, h) * adj / 100000` (LibreOffice's preset table).
+  It used to divide by HALF the shorter side.
+
+**Until 0.3 this was a halving** (`fontSize / 2`, 8pt floor) with every other
+length taken as points. `theme.slideWidth: 1440` reproduces it exactly.
+
+### 10. Embedded fonts (`fonts/`)
+
+Opt-in through the write options (`{"fonts": {typeface: {variant: path | bytes}}}`),
+never through the deck: an agent names a face, the host supplies the licensed file.
+
+- **`.fntdata` is an EOT, not a `.ttf`**, uncompressed, and byte-identical to the
+  PHP engine's header (charset 1, NUL-terminated UTF-16LE names).
+  `test_embedded_fonts_emit_the_same_parts` compares the parts as BYTES; changing
+  the charset byte alone turns it red.
+- **Refusals match PHP's text exactly** and are collected and raised together as
+  `FontEmbeddingException` before anything is written. Two PHP-isms are
+  reproduced on purpose: the family check is `strcasecmp` after `trim`, i.e. an
+  ASCII case fold over UTF-8 bytes, and a name record is decoded the way
+  `Utf16::beToUtf8` does it, keeping an unpaired surrogate instead of raising.
+- **No font supplied means no byte changes.** `embedTrueTypeFonts="1"` replaces
+  `saveSubsetFonts="1"` only when a font is embedded.
+- **PowerPoint and Google Slides are not verified.** The opt-in render test
+  (`DARK_SLIDE_RENDER=1`) checks the output through LibreOffice.
+- Tests build their own TrueType font (`tests/generated_font.py`), byte-identical
+  to PHP's `tests/Support/GeneratedFont`, so no third-party font is committed.
+
 ## Layout
 
 ```
 src/dark_slide/
   __init__.py            the public façade
   agent.py               the Agent surface as module-level functions
-  exceptions.py          SchemaException (carries the structured error list)
+  exceptions.py          SchemaException (the structured error list) · FontEmbeddingException
+  fonts/                 true_type_font · embedded_open_type (EOT) · embedded_fonts (options -> parts)
   util.py                PHP loose-typing semantics, written down once
   schema/                schema.py · validator.py · repairer.py · types.py
   writer/pptx_writer.py  string building; the byte contract lives here
   reader/pptx_reader.py  ElementTree; best-effort, degrades rather than raises
-  helpers/               xml · color · emu (php_round) · markdown_inline
+  helpers/               xml · color · emu (php_round) · design_units · markdown_inline
                          · syntax_highlighter · chart_translator
 ```
 

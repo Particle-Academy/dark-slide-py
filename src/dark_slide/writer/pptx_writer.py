@@ -44,7 +44,10 @@ import urllib.request
 import zipfile
 from typing import Any
 
+from ..fonts.embedded_fonts import VARIANTS as FONT_VARIANTS
+from ..fonts.embedded_fonts import EmbeddedFonts
 from ..helpers import color as Color
+from ..helpers import design_units as DesignUnits
 from ..helpers import emu as Emu
 from ..helpers import markdown_inline as MarkdownInline
 from ..helpers import syntax_highlighter as SyntaxHighlighter
@@ -145,21 +148,32 @@ NS_DARK_SLIDE = "urn:particle-academy:dark-slide"
 class PptxWriter:
     """The writer. One instance per document; the counters reset per call."""
 
-    def __init__(self, temp_dir: str | None = None, allow_http_images: bool = False) -> None:
+    def __init__(
+        self,
+        temp_dir: str | None = None,
+        allow_http_images: bool = False,
+        fonts: EmbeddedFonts | None = None,
+    ) -> None:
         #: Kept for signature parity with the peers. This port assembles the
         #: archive in memory, so nothing is ever written here.
         self.temp_dir = temp_dir
         #: OFF by default. Fetching a remote URL from inside a document writer
         #: is an SSRF surface, so it is a decision the caller makes explicitly.
         self.allow_http_images = allow_http_images
+        #: Fonts the host asked to embed, already validated and EOT-wrapped.
+        #: ``None`` writes no font parts and changes no bytes.
+        self.fonts = fonts
 
         self._media_counter = 0
         self._chart_counter = 0
         self._media_files: list[tuple[str, bytes]] = []
         self._chart_files: list[tuple[str, str]] = []
         self._theme_accent = "8B5CF6"
-        #: The deck's theme, kept whole so the table resolver can read its colours.
+        #: The deck's theme, kept whole so the table resolver can read its colours
+        #: and ``DesignUnits`` its canvas.
         self._deck_theme: dict[str, Any] = {}
+        #: Slide height in EMU: 10in wide, ``theme.aspectRatio`` decides the rest.
+        self._slide_height_emu = Emu.DEFAULT_SLIDE_HEIGHT
         #: Monospace typeface for code runs, from ``theme.fonts.mono``.
         #:
         #: There is no third slot in OOXML's ``<a:fontScheme>`` — a theme carries
@@ -204,6 +218,7 @@ class PptxWriter:
             accent if isinstance(accent, str) else "#8B5CF6", "8B5CF6"
         )[0]
         self._deck_theme = theme
+        self._slide_height_emu = DesignUnits.slide_height_emu(theme)
         mono = _get(_dict(_get(theme, "fonts")), "mono", "")
         self._theme_mono = (
             mono.strip() if isinstance(mono, str) and mono.strip() != "" else "Consolas"
@@ -231,14 +246,19 @@ class PptxWriter:
         notes_ids = list(notes_slides_xml.keys())
         chart_paths = [path for path, _ in self._chart_files]
 
+        fonts = self.fonts if self.fonts is not None else EmbeddedFonts.none()
+
         # 2. Top-level + ppt-level scaffolding.
-        add("[Content_Types].xml", self._build_content_types(slide_count, notes_ids, chart_paths))
+        add(
+            "[Content_Types].xml",
+            self._build_content_types(slide_count, notes_ids, chart_paths, not fonts.is_empty()),
+        )
         add("_rels/.rels", self._build_top_rels())
         add("docProps/core.xml", self._build_core_props(deck))
         add("docProps/app.xml", self._build_app_props(slide_count))
 
-        add("ppt/presentation.xml", self._build_presentation(slide_count))
-        add("ppt/_rels/presentation.xml.rels", self._build_presentation_rels(slide_count))
+        add("ppt/presentation.xml", self._build_presentation(slide_count, fonts))
+        add("ppt/_rels/presentation.xml.rels", self._build_presentation_rels(slide_count, fonts))
 
         add("ppt/theme/theme1.xml", self._build_theme(deck))
         add("ppt/slideMasters/slideMaster1.xml", self._build_slide_master())
@@ -273,12 +293,20 @@ class PptxWriter:
         for path, payload in self._media_files:
             add(path, payload)
 
+        # 8. Embedded fonts (only when the host supplied them).
+        for font in fonts.parts:
+            add(font["part"], font["bytes"])
+
         return _zip(files)
 
     # ── Top-level parts ───────────────────────────────────────────────────
 
     def _build_content_types(
-        self, slide_count: int, notes_slide_ids: list[int], chart_parts: list[str]
+        self,
+        slide_count: int,
+        notes_slide_ids: list[int],
+        chart_parts: list[str],
+        has_fonts: bool = False,
     ) -> str:
         slide_overrides = "".join(
             f'<Override PartName="/ppt/slides/slide{i}.xml" '
@@ -313,6 +341,9 @@ class PptxWriter:
             '<Default Extension="svg" ContentType="image/svg+xml"/>'
             '<Default Extension="webp" ContentType="image/webp"/>'
         )
+        # Only when a font is embedded, so every other deck keeps its bytes.
+        if has_fonts:
+            extension_defaults += '<Default Extension="fntdata" ContentType="application/x-fontdata"/>'
 
         return (
             Xml.declaration()
@@ -376,27 +407,67 @@ class PptxWriter:
 
     # ── presentation.xml ──────────────────────────────────────────────────
 
-    def _build_presentation(self, slide_count: int) -> str:
+    def _build_presentation(self, slide_count: int, fonts: EmbeddedFonts | None = None) -> str:
         # Slide ids must be >= 256 per ECMA-376.
         sld_id_lst = "".join(
             f'<p:sldId id="{256 + (i - 1)}" r:id="rId{i + 1}"/>' for i in range(1, slide_count + 1)
         )
         slide_master_rid = f"rId{slide_count + 2}"
+        fonts = fonts if fonts is not None else EmbeddedFonts.none()
+
+        # With embedded fonts the file says so, and drops `saveSubsetFonts`: that
+        # flag declares the embedded fonts to be character subsets, and these are
+        # whole fonts. LibreOffice's own export writes the same pair.
+        font_flag = 'saveSubsetFonts="1"' if fonts.is_empty() else 'embedTrueTypeFonts="1"'
 
         return (
             Xml.declaration()
             + '<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
             + 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
             + 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
-            + 'saveSubsetFonts="1">'
+            + font_flag
+            + ">"
             + f'<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="{slide_master_rid}"/></p:sldMasterIdLst>'
             + f"<p:sldIdLst>{sld_id_lst}</p:sldIdLst>"
-            + f'<p:sldSz cx="{Emu.DEFAULT_SLIDE_WIDTH}" cy="{Emu.DEFAULT_SLIDE_HEIGHT}" type="screen16x9"/>'
+            + self._slide_size_xml()
             + f'<p:notesSz cx="{Emu.DEFAULT_SLIDE_HEIGHT}" cy="{Emu.DEFAULT_SLIDE_WIDTH}"/>'
+            + self._build_embedded_font_list(slide_count, fonts)
             + "</p:presentation>"
         )
 
-    def _build_presentation_rels(self, slide_count: int) -> str:
+    def _slide_size_xml(self) -> str:
+        """``<p:sldSz>`` for a 10in-wide slide shaped by ``theme.aspectRatio``.
+
+        The ratio used to be accepted by the validator and published in the
+        schema while every deck was written 16:9, so a 4:3 deck came out
+        stretched. A named size (16:9, 16:10, 4:3) keeps its ``type``; anything
+        else is custom, which PPTX expresses by leaving ``type`` off.
+        """
+        size_type = DesignUnits.slide_size_type(self._slide_height_emu)
+        type_attr = f' type="{size_type}"' if size_type is not None else ""
+        return f'<p:sldSz cx="{Emu.DEFAULT_SLIDE_WIDTH}" cy="{self._slide_height_emu}"{type_attr}/>'
+
+    def _build_embedded_font_list(self, slide_count: int, fonts: EmbeddedFonts) -> str:
+        """``<p:embeddedFontLst>``: one entry per typeface, its variants in the
+        schema's fixed order. It follows ``<p:notesSz>`` because
+        ``CT_Presentation`` is a sequence; relationship ids continue after the
+        slide master's, in the order ``_build_presentation_rels`` emits them."""
+        if fonts.is_empty():
+            return ""
+
+        rid = slide_count + 3
+        entries = ""
+        for typeface, variants in fonts.by_typeface().items():
+            entries += f'<p:embeddedFont><p:font typeface="{Xml.attr(typeface)}"/>'
+            for variant in FONT_VARIANTS:
+                if variant in variants:
+                    entries += f'<p:{variant} r:id="rId{rid}"/>'
+                    rid += 1
+            entries += "</p:embeddedFont>"
+
+        return f"<p:embeddedFontLst>{entries}</p:embeddedFontLst>"
+
+    def _build_presentation_rels(self, slide_count: int, fonts: EmbeddedFonts | None = None) -> str:
         rels = '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>'
         for i in range(1, slide_count + 1):
             rels += (
@@ -409,6 +480,18 @@ class PptxWriter:
             'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" '
             'Target="slideMasters/slideMaster1.xml"/>'
         )
+
+        # Font relationships in the same typeface-then-variant order as the list.
+        rid = slide_count + 3
+        for variants in (fonts if fonts is not None else EmbeddedFonts.none()).by_typeface().values():
+            for variant in FONT_VARIANTS:
+                if variant in variants:
+                    rels += (
+                        f'<Relationship Id="rId{rid}" '
+                        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" '
+                        f'Target="{variants[variant][len("ppt/"):]}"/>'
+                    )
+                    rid += 1
 
         return (
             Xml.declaration()
@@ -1215,7 +1298,7 @@ class PptxWriter:
         element_id = _get(element, "id", f"text-{shape_id}")
 
         width_emu = Emu.from_frac_x(php_float(_get(element, "w", 0.8)))
-        height_emu = Emu.from_frac_y(php_float(_get(element, "h", 0.2)))
+        height_emu = Emu.from_frac_y(php_float(_get(element, "h", 0.2)), self._slide_height_emu)
 
         return (
             "<p:sp>"
@@ -1226,7 +1309,7 @@ class PptxWriter:
             "</p:nvSpPr>"
             "<p:spPr>"
             f"{xfrm}"
-            f"{box_decoration.sp_pr(style_dict, width_emu, height_emu)}"
+            f"{box_decoration.sp_pr(style_dict, width_emu, height_emu, self._deck_theme)}"
             "</p:spPr>"
             f"{body}"
             "</p:sp>"
@@ -1257,9 +1340,9 @@ class PptxWriter:
         fit = fit_value.lower() if isinstance(fit_value, str) else "fill"
 
         box_x = Emu.from_frac_x(php_float(_get(element, "x", 0)))
-        box_y = Emu.from_frac_y(php_float(_get(element, "y", 0)))
+        box_y = Emu.from_frac_y(php_float(_get(element, "y", 0)), self._slide_height_emu)
         box_w = max(1, Emu.from_frac_x(php_float(_get(element, "w", 0))))
-        box_h = max(1, Emu.from_frac_y(php_float(_get(element, "h", 0))))
+        box_h = max(1, Emu.from_frac_y(php_float(_get(element, "h", 0)), self._slide_height_emu))
 
         intrinsic = image_size(embed["bytes"])
         img_w = intrinsic[0] if intrinsic else 0
@@ -1366,8 +1449,9 @@ class PptxWriter:
             _str_or(element.get("fill"), "rgba(139,92,246,0.15)"), "8B5CF6"
         )
         stroke_hex, stroke_alpha = Color.parse(_str_or(element.get("stroke"), "#8B5CF6"), "8B5CF6")
+        # Design pixels, as fancy-slides draws it: the default 2px is 0.75pt.
         stroke_width = php_float(_get(element, "strokeWidth", 2))
-        stroke_width_emu = Emu.from_pt(stroke_width)
+        stroke_width_emu = Emu.from_pt(DesignUnits.to_pt(stroke_width, self._deck_theme))
         dash = '<a:prstDash val="dash"/>' if php_truthy(element.get("dashed")) else ""
 
         fill_xml = (
@@ -1402,6 +1486,19 @@ class PptxWriter:
             )
         )
 
+        # A rounded rectangle takes its `radius` (design pixels, fancy-slides'
+        # default 8) instead of PowerPoint's default corner, which it ignored.
+        geometry = (
+            box_decoration.round_rect_geometry(
+                php_float(_get(element, "radius", 8)),
+                Emu.from_frac_x(php_float(_get(element, "w", 0))),
+                Emu.from_frac_y(php_float(_get(element, "h", 0)), self._slide_height_emu),
+                self._deck_theme,
+            )
+            if prst == "roundRect"
+            else f'<a:prstGeom prst="{prst}"><a:avLst/></a:prstGeom>'
+        )
+
         return (
             "<p:sp>"
             "<p:nvSpPr>"
@@ -1411,7 +1508,7 @@ class PptxWriter:
             "</p:nvSpPr>"
             "<p:spPr>"
             f"{xfrm}"
-            f'<a:prstGeom prst="{prst}"><a:avLst/></a:prstGeom>'
+            f"{geometry}"
             f"{fill_xml}"
             f"{ln_xml}"
             "</p:spPr>"
@@ -1425,7 +1522,9 @@ class PptxWriter:
         element_id = _get(element, "id", f"code-{shape_id}")
         language_value = element.get("language")
         language = php_string(language_value) if language_value is not None else None
-        body = self._build_highlighted_code_body(code, language)
+        code_style = element.get("style")
+        code_style = code_style if is_plain_object(code_style) else {}
+        body = self._build_highlighted_code_body(code, language, php_float(_get(code_style, "fontSize", 32)))
 
         return (
             "<p:sp>"
@@ -1443,8 +1542,10 @@ class PptxWriter:
             "</p:sp>"
         )
 
-    def _build_highlighted_code_body(self, code: str, language: str | None) -> str:
-        sz = Emu.hundredths_of_point(12)
+    def _build_highlighted_code_body(self, code: str, language: str | None, font_size_px: float = 32.0) -> str:
+        # It was a fixed 12pt that no style could change. 32 design px is that
+        # same 12pt on the default canvas.
+        sz = Emu.hundredths_of_point(DesignUnits.font_pt(font_size_px, self._deck_theme))
         paragraphs = ""
         for line in code.split("\n"):
             tokens = SyntaxHighlighter.tokenize(line, language)
@@ -2010,10 +2111,10 @@ class PptxWriter:
     # ── Text body / paragraphs / runs ─────────────────────────────────────
 
     def _build_text_body(self, content: str, style: dict[str, Any], fmt: str) -> str:
-        font_pt = php_float(_get(style, "fontSize", 24))
-        # fancy-slides designs against a 1920px width; PPTX renders ~720px at
-        # 10 inches, so halving lands in PPTX-sensible territory.
-        pt = max(8.0, font_pt / 2)
+        # Design pixels scaled with the canvas (see DesignUnits), defaulting to
+        # fancy-slides' own 28. This was a halving with an 8pt floor, which made
+        # PowerPoint text a third larger than the fancy-slides preview.
+        pt = DesignUnits.font_pt(php_float(_get(style, "fontSize", 28)), self._deck_theme)
         sz = Emu.hundredths_of_point(pt)
         base_bold = self._weight_to_bold(style.get("weight"))
         base_italic = ' i="1"' if php_truthy(style.get("italic")) else ""
@@ -2095,7 +2196,7 @@ class PptxWriter:
 
         return (
             "<p:txBody>"
-            f'<a:bodyPr wrap="square" anchor="{anchor}" rtlCol="0"{box_decoration.body_insets(style)}/>'
+            f'<a:bodyPr wrap="square" anchor="{anchor}" rtlCol="0"{box_decoration.body_insets(style, self._deck_theme)}/>'
             "<a:lstStyle/>"
             f"{paragraphs}"
             "</p:txBody>"
@@ -2146,9 +2247,9 @@ class PptxWriter:
             pct = int(php_round(php_float(style["lineHeight"]) * 100000))
             out += f'<a:lnSpc><a:spcPct val="{pct}"/></a:lnSpc>'
         if is_numeric(style.get("spaceBefore")):
-            out += f'<a:spcBef><a:spcPts val="{Emu.hundredths_of_point(php_float(style["spaceBefore"]))}"/></a:spcBef>'
+            out += f'<a:spcBef><a:spcPts val="{Emu.hundredths_of_point(DesignUnits.to_pt(php_float(style["spaceBefore"]), self._deck_theme))}"/></a:spcBef>'
         if is_numeric(style.get("spaceAfter")):
-            out += f'<a:spcAft><a:spcPts val="{Emu.hundredths_of_point(php_float(style["spaceAfter"]))}"/></a:spcAft>'
+            out += f'<a:spcAft><a:spcPts val="{Emu.hundredths_of_point(DesignUnits.to_pt(php_float(style["spaceAfter"]), self._deck_theme))}"/></a:spcAft>'
         return out
 
     def _bullet_markup(self, bullet: Any) -> str:
@@ -2175,7 +2276,7 @@ class PptxWriter:
         """
         out = ""
         if is_numeric(style.get("letterSpacing")):
-            out += f' spc="{Emu.hundredths_of_point(php_float(style["letterSpacing"]))}"'
+            out += f' spc="{Emu.hundredths_of_point(DesignUnits.to_pt(php_float(style["letterSpacing"]), self._deck_theme))}"'
         caps = style.get("caps")
         if caps == "small":
             out += ' cap="small"'
@@ -2199,9 +2300,9 @@ class PptxWriter:
 
     def _xfrm_from_fractions(self, element: dict[str, Any]) -> str:
         x = Emu.from_frac_x(php_float(_get(element, "x", 0)))
-        y = Emu.from_frac_y(php_float(_get(element, "y", 0)))
+        y = Emu.from_frac_y(php_float(_get(element, "y", 0)), self._slide_height_emu)
         cx = Emu.from_frac_x(php_float(_get(element, "w", 0)))
-        cy = Emu.from_frac_y(php_float(_get(element, "h", 0)))
+        cy = Emu.from_frac_y(php_float(_get(element, "h", 0)), self._slide_height_emu)
         rotation = element.get("rotation")
         rot = int(php_round(php_float(rotation) * 60000)) if rotation is not None else 0
         rot_attr = f' rot="{rot}"' if rot != 0 else ""

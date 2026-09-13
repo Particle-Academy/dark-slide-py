@@ -74,11 +74,16 @@ def _kpi_band(element: dict[str, Any], theme: dict[str, Any]) -> dict[str, Any]:
         captions[key] = php_string(item.get("caption", ""))
 
     # Only the rule BETWEEN kpis, plus the band's own outline.
+    #
+    # Every length in a composite is DESIGN PIXELS, like the font sizes beside
+    # it. These defaults were points before 0.3; each is doubled, which is
+    # exactly its old size at `theme.slideWidth: 1440` and keeps its proportion
+    # to the text on the default 1920 canvas.
     borders = style.get(
         "borders",
         {
-            "inner": {"width": 0.75, "color": _theme_color(theme, "muted", "#D9DEE4")},
-            "outer": {"width": 0.75, "color": _theme_color(theme, "muted", "#D9DEE4")},
+            "inner": {"width": 1.5, "color": _theme_color(theme, "muted", "#D9DEE4")},
+            "outer": {"width": 1.5, "color": _theme_color(theme, "muted", "#D9DEE4")},
         },
     )
 
@@ -96,7 +101,7 @@ def _kpi_band(element: dict[str, Any], theme: dict[str, Any]) -> dict[str, Any]:
         "rows": [
             {
                 "cells": values,
-                "height": style.get("valueHeight", 44),
+                "height": style.get("valueHeight", 88),
                 "fontSize": value_size,
                 "color": value_color,
                 "bold": True,
@@ -106,7 +111,7 @@ def _kpi_band(element: dict[str, Any], theme: dict[str, Any]) -> dict[str, Any]:
             },
             {
                 "cells": captions,
-                "height": style.get("captionHeight", 30),
+                "height": style.get("captionHeight", 60),
                 "fontSize": caption_size,
                 "color": caption_color,
                 "align": align,
@@ -118,7 +123,7 @@ def _kpi_band(element: dict[str, Any], theme: dict[str, Any]) -> dict[str, Any]:
             "header": False,
             "stripe": False,
             "fill": fill,
-            "padding": style.get("padding", {"left": 8, "right": 8, "top": 2, "bottom": 2}),
+            "padding": style.get("padding", {"left": 16, "right": 16, "top": 4, "bottom": 4}),
         },
     }
 
@@ -155,10 +160,11 @@ def _metadata_grid(element: dict[str, Any], theme: dict[str, Any]) -> dict[str, 
         rows.append(
             {
                 "cells": labels,
-                "height": style.get("labelHeight", 18),
+                # Design pixels throughout; see _kpi_band() for why these doubled.
+                "height": style.get("labelHeight", 36),
                 "fontSize": style.get("labelFontSize", 18),
                 "color": label_color,
-                "letterSpacing": style.get("labelLetterSpacing", 1.2),
+                "letterSpacing": style.get("labelLetterSpacing", 2.4),
                 "caps": "small",
                 "bold": True,
                 "anchor": "bottom",
@@ -167,7 +173,7 @@ def _metadata_grid(element: dict[str, Any], theme: dict[str, Any]) -> dict[str, 
         rows.append(
             {
                 "cells": values,
-                "height": style.get("valueHeight", 26),
+                "height": style.get("valueHeight", 52),
                 "fontSize": style.get("valueFontSize", 28),
                 "color": value_color,
                 "bold": True,
@@ -192,7 +198,7 @@ def _metadata_grid(element: dict[str, Any], theme: dict[str, Any]) -> dict[str, 
             "stripe": False,
             "borders": style.get("borders", False),
             "fill": fill,
-            "padding": style.get("padding", {"left": 10, "right": 10, "top": 2, "bottom": 2}),
+            "padding": style.get("padding", {"left": 20, "right": 20, "top": 4, "bottom": 4}),
         },
     }
 

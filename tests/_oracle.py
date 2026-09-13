@@ -88,8 +88,12 @@ def require_oracle() -> None:
         )
 
 
-def php_to_bytes(payload: object) -> bytes:
-    """Run the PHP writer over `payload` and return the pptx bytes."""
+def php_to_bytes(payload: object, options: dict | None = None) -> bytes:
+    """Run the PHP writer over `payload` and return the pptx bytes.
+
+    `options` are the PHP write options as JSON; a `fonts` map must give file
+    PATHS, since font bytes cannot travel through JSON.
+    """
     binary = php_binary()
     src = php_src_root()
     if binary is None or src is None:
@@ -99,12 +103,17 @@ def php_to_bytes(payload: object) -> bytes:
         json_path = Path(tmp) / "input.json"
         out_path = Path(tmp) / "out.pptx"
         json_path.write_text(json.dumps(payload), encoding="utf-8")
+        args = [binary, str(PHP_SCRIPT), str(json_path), str(out_path)]
+        if options is not None:
+            options_path = Path(tmp) / "options.json"
+            options_path.write_text(json.dumps(options), encoding="utf-8")
+            args.append(str(options_path))
 
         env = dict(os.environ)
         env[_PHP_SRC_ENV] = str(src)
 
         result = subprocess.run(
-            [binary, str(PHP_SCRIPT), str(json_path), str(out_path)],
+            args,
             capture_output=True,
             env=env,
         )

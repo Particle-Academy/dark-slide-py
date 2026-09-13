@@ -91,8 +91,14 @@ class Schema:
                     "required": ["name"],
                     "properties": {
                         "name": {"type": "string"},
-                        "aspectRatio": {"type": "number"},
-                        "slideWidth": {"type": "number"},
+                        "aspectRatio": {
+                            "type": "number",
+                            "description": "Slide width divided by height, 16/9 by default. 16/9, 16/10 and 4/3 are written as PowerPoint's named sizes, anything else as a custom size; the slide is always 10 inches wide.",
+                        },
+                        "slideWidth": {
+                            "type": "number",
+                            "description": "Width of the design canvas in pixels, 1920 by default, as fancy-slides uses it. Every length in the deck (fontSize, strokeWidth, padding and the rest) is a pixel on this canvas and keeps its share of the slide width. 1440 reproduces the text sizes dark-slide wrote before 0.10.",
+                        },
                         "colors": {
                             "type": "object",
                             "properties": {
@@ -171,61 +177,124 @@ class Schema:
 def _style_json_schema() -> dict[str, Any]:
     """The `style` object, with the unit of every field the writer reads.
 
-    It used to be published as a bare `{"type": "object"}`, so a model filling it
-    in had only the key names, and `fontSize` reads as points. It is design
-    pixels, halved on the way into the file: an agent in the fancy-labs document
-    lab set a headline at what it called 232pt and the deck carried 116pt. The
-    units in this object are not all the same either.
+    Published as a bare `{"type": "object"}` until 0.2.1, so a model filling it
+    in had only the key names, and `fontSize` reads as points: an agent in the
+    fancy-labs document lab set a headline at what it called 232pt and the deck
+    carried 116pt. 0.3 gave the whole object ONE unit, the design pixel (see
+    :mod:`dark_slide.helpers.design_units`), and this says so.
 
     IDENTICAL to the PHP reference's `Schema::styleJsonSchema()`;
     `tests/test_schema_describes_style_units.py` diffs the two exports.
     """
     return {
         "type": "object",
-        "description": (
-            "How a text element, or the text inside a shape, looks. The units are NOT uniform: "
-            "fontSize is in design pixels and is halved into points, while letterSpacing, "
-            "spaceBefore, spaceAfter, padding, radius and the border and accent-bar widths are "
-            "already in points, and lineHeight is a multiple."
-        ),
+        "description": "How a text element, or the text inside a shape, looks. Every length here is in DESIGN PIXELS on the deck's canvas (theme.slideWidth, 1920 by default), the same unit as fontSize, and keeps its share of the slide width: points = px x 720 / slideWidth. lineHeight is a multiple, not a length.",
         "properties": {
-            "fontSize": {"type": "number", "description": "Type size in DESIGN PIXELS on the 1920px-wide fancy-slides canvas, NOT points. The PPTX file carries half, with an 8pt minimum: 96 is written as 48pt, 24 as 12pt, and anything under 16 as 8pt. Default 24."},
-            "fontFamily": {"type": "string", "description": "Typeface name. No font is embedded in the file, so where this face is not installed the viewer substitutes another, which also changes how wide the text is."},
-            "weight": {"type": ["string", "number"], "description": 'Bold when "bold" or "semibold", or a number of 600 or more. PPTX has only bold and regular, so any other weight renders regular.'},
-            "italic": {"type": "boolean"},
-            "underline": {"type": "boolean"},
-            "color": {"type": "string", "description": 'Text colour as a hex string. Default "#0F172A".'},
-            "align": {"type": "string", "description": 'Horizontal alignment: "left" (default), "center", "right" or "justify". Anything else renders left.'},
-            "verticalAlign": {"type": "string", "description": 'Vertical alignment inside the box: "top" (default), "middle" or "bottom".'},
-            "lineHeight": {"type": "number", "description": "Line spacing as a MULTIPLE of the type size, as in CSS: 1.4 is written as 140% line spacing."},
-            "letterSpacing": {"type": "number", "description": "Extra space between letters, in POINTS, not halved: 2 is written as 2pt."},
-            "spaceBefore": {"type": "number", "description": "Space above each paragraph, in POINTS, not halved: 6 is written as 6pt."},
-            "spaceAfter": {"type": "number", "description": "Space below each paragraph, in POINTS, not halved."},
-            "caps": {"type": "string", "description": '"small" for small capitals, or "all" (also "upper") for all capitals.'},
-            "bullet": {"type": ["string", "boolean"], "description": 'Marker for list lines ("- item"): omit for a round bullet, "none" or false for no marker, "number" for 1. 2. 3., or any other string to use it as the marker character.'},
-            "fill": {"type": ["string", "boolean"], "description": 'Background colour of the box, as a hex string. "none" or false for no fill.'},
-            "radius": {"type": "number", "description": "Corner radius of the box, in POINTS."},
+            "fontSize": {
+                "type": "number",
+                "description": "Type size in DESIGN PIXELS on the theme.slideWidth canvas, as fancy-slides renders it. Written to PPTX as px x 720 / slideWidth points, never below 1pt: on the default 1920 canvas 96 is written as 36pt and 28 as 10.5pt. Default 28.",
+            },
+            "fontFamily": {
+                "type": "string",
+                "description": "Typeface name. It renders in that face only where the face is installed, unless the host embeds the font file when writing (the `fonts` write option); anywhere else a substitute face is used, which also changes how wide the text is.",
+            },
+            "weight": {
+                "type": ["string", "number"],
+                "description": "Bold when \"bold\" or \"semibold\", or a number of 600 or more. PPTX has only bold and regular, so any other weight renders regular.",
+            },
+            "italic": {
+                "type": "boolean",
+            },
+            "underline": {
+                "type": "boolean",
+            },
+            "color": {
+                "type": "string",
+                "description": "Text colour as a hex string. Default \"#0F172A\".",
+            },
+            "align": {
+                "type": "string",
+                "description": "Horizontal alignment: \"left\" (default), \"center\", \"right\" or \"justify\". Anything else renders left.",
+            },
+            "verticalAlign": {
+                "type": "string",
+                "description": "Vertical alignment inside the box: \"top\" (default), \"middle\" or \"bottom\".",
+            },
+            "lineHeight": {
+                "type": "number",
+                "description": "Line spacing as a MULTIPLE of the type size, as in CSS: 1.4 is written as 140% line spacing.",
+            },
+            "letterSpacing": {
+                "type": "number",
+                "description": "Extra space between letters, in design pixels: on the default canvas 8 is written as 3pt.",
+            },
+            "spaceBefore": {
+                "type": "number",
+                "description": "Space above each paragraph, in design pixels: on the default canvas 16 is written as 6pt.",
+            },
+            "spaceAfter": {
+                "type": "number",
+                "description": "Space below each paragraph, in design pixels.",
+            },
+            "caps": {
+                "type": "string",
+                "description": "\"small\" for small capitals, or \"all\" (also \"upper\") for all capitals.",
+            },
+            "bullet": {
+                "type": ["string", "boolean"],
+                "description": "Marker for list lines (\"- item\"): omit for a round bullet, \"none\" or false for no marker, \"number\" for 1. 2. 3., or any other string to use it as the marker character.",
+            },
+            "fill": {
+                "type": ["string", "boolean"],
+                "description": "Background colour of the box, as a hex string. \"none\" or false for no fill.",
+            },
+            "radius": {
+                "type": "number",
+                "description": "Corner radius of the box, in design pixels.",
+            },
             "border": {
                 "type": "object",
                 "description": "An outline on all four sides of the box. PPTX cannot outline a single side; use accentBar for that.",
                 "properties": {
-                    "width": {"type": "number", "description": "Line width in POINTS. Default 1; 0 draws no line."},
-                    "color": {"type": "string", "description": 'Hex colour. Default "#CBD5E1".'},
-                    "style": {"type": "string", "description": '"solid" (default), or a DrawingML dash name such as "dash" or "sysDot".'},
+                    "width": {
+                        "type": "number",
+                        "description": "Line width in design pixels. Unset gives a 1pt line; 0 draws no line.",
+                    },
+                    "color": {
+                        "type": "string",
+                        "description": "Hex colour. Default \"#CBD5E1\".",
+                    },
+                    "style": {
+                        "type": "string",
+                        "description": "\"solid\" (default), or a DrawingML dash name such as \"dash\" or \"sysDot\".",
+                    },
                 },
             },
-            "padding": {"type": ["number", "object"], "description": "Inset between the box edge and the text, in POINTS: one number for every side (12 is written as 12pt), or {left, right, top, bottom}. When unset the insets are 7.2 left and right and 3.6 top and bottom, widened to clear an accent bar."},
+            "padding": {
+                "type": ["number", "object"],
+                "description": "Inset between the box edge and the text, in design pixels: one number for every side (on the default canvas 32 is written as 12pt), or {left, right, top, bottom}. When unset the insets are PowerPoint's own 7.2pt left and right and 3.6pt top and bottom, widened to clear an accent bar.",
+            },
             "accentBar": {
                 "type": "object",
                 "description": "A coloured bar down one edge of the box, as on a callout. Painted inside the same shape, so it needs no second element.",
                 "properties": {
-                    "color": {"type": "string", "description": 'Hex colour. Default "#8B5CF6".'},
-                    "width": {"type": "number", "description": "Bar width in POINTS. Default 4."},
-                    "side": {"type": "string", "description": '"left" (default) or "right".'},
+                    "color": {
+                        "type": "string",
+                        "description": "Hex colour. Default \"#8B5CF6\".",
+                    },
+                    "width": {
+                        "type": "number",
+                        "description": "Bar width in design pixels. Unset gives a 4pt bar.",
+                    },
+                    "side": {
+                        "type": "string",
+                        "description": "\"left\" (default) or \"right\".",
+                    },
                 },
             },
         },
     }
+
 
 
 def _element_json_schema() -> dict[str, Any]:
@@ -255,7 +324,10 @@ def _element_json_schema() -> dict[str, Any]:
             "shape": {"type": "string", "enum": Schema.SHAPE_KINDS},
             "fill": {"type": "string"},
             "stroke": {"type": "string"},
-            "strokeWidth": {"type": "number"},
+            "strokeWidth": {
+                "type": "number",
+                "description": "A shape's outline width in design pixels, 2 by default (0.75pt on the default canvas); 0 for no outline.",
+            },
             "dashed": {"type": "boolean"},
             "radius": {"type": "number"},
             "code": {"type": "string"},

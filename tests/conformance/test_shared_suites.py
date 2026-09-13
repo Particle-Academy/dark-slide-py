@@ -49,7 +49,14 @@ from tests.conformance import loader
 # that checkout: shared/strings 8, shared/decimal 18, dark-slide/table-cell-model
 # 26, nothing failed or skipped. 0.21.x added flow/connector-runs, which this port
 # does not run. Stale a third time, and again the release that moved it was ours.
-PINNED_SUITE_VERSION = "0.21.2"
+#
+# Moved 0.21.2 -> 0.22.0 on 2026-09-13, with the design-pixel unit model. That
+# release regenerated 23 dark-slide/table-cell-model goldens from the PHP
+# reference and added 0027 and 0028; re-run first against this port's new
+# resolver: shared/strings 8, shared/decimal 18, dark-slide/table-cell-model 28,
+# nothing failed or skipped, including the rounding ties (a 1-wide rule at
+# 0.375pt is 4763 EMU, 0.6 of letter spacing is 23 hundredths).
+PINNED_SUITE_VERSION = "0.22.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk() -> None:

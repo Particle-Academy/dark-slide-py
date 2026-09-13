@@ -693,6 +693,139 @@ DECKS["escapingAndLoose"] = {
 }
 
 
+
+def _lengths_slide(slide_id: str) -> dict[str, Any]:
+    """One slide stating every authored length the 0.3 design-pixel model converts."""
+    return {
+        "id": slide_id,
+        "layout": "blank",
+        "elements": [
+            {
+                "id": "callout", "type": "text", "x": 0.05, "y": 0.05, "w": 0.6, "h": 0.25,
+                "content": "- Stated lengths\n- converted once", "format": "markdown",
+                "style": {
+                    "fontSize": 60, "letterSpacing": 3, "spaceBefore": 10, "spaceAfter": 6,
+                    "lineHeight": 1.3, "padding": {"left": 20, "top": 6}, "radius": 12,
+                    "fill": "#E8F2F3", "accentBar": {"color": "#0E7C86", "width": 10},
+                },
+            },
+            {
+                "id": "boxed", "type": "text", "x": 0.7, "y": 0.05, "w": 0.25, "h": 0.2,
+                "content": "Outlined", "style": {"border": {"width": 2, "color": "#1B3A5C"}, "padding": 18},
+            },
+            {
+                "id": "outline", "type": "shape", "shape": "rect",
+                "x": 0.05, "y": 0.35, "w": 0.2, "h": 0.15, "strokeWidth": 5, "fill": "#FFFFFF",
+            },
+            {
+                "id": "snippet", "type": "code", "x": 0.3, "y": 0.35, "w": 0.65, "h": 0.2,
+                "code": "const x = 1;", "language": "typescript", "style": {"fontSize": 40},
+            },
+            {
+                "id": "grid", "type": "table", "x": 0.05, "y": 0.6, "w": 0.9, "h": 0.35,
+                "columns": [{"key": "a", "label": "A"}, {"key": "b", "label": "B"}],
+                "rows": [{"a": "1", "b": "2"}, {"cells": {"a": "3", "b": "4"}, "height": 70, "letterSpacing": 1.5}],
+                "style": {
+                    "fontSize": 30, "padding": 14, "rowHeight": 50,
+                    "borders": {"outer": {"width": 3, "color": "#1B3A5C"}, "inner": {"width": 1}},
+                    "header": {"height": 60, "letterSpacing": 2},
+                },
+            },
+        ],
+    }
+
+
+DECKS["designLengths1920"] = {
+    # Every authored length on the DEFAULT canvas, where px * 720 / 1920 lands
+    # several of them on rounding ties (a 1px rule is 4762.5 EMU, 3px of
+    # letter spacing 112.5 hundredths). A port that multiplies in a different
+    # order, or rounds half-to-even, moves one of these by a unit.
+    "id": "deck-lengths-1920",
+    "title": "Design lengths, default canvas",
+    "metadata": META,
+    "theme": {"name": "default"},
+    "slides": [_lengths_slide("s1")],
+}
+
+
+DECKS["designLengths1440"] = {
+    # The same slide on the 1440 canvas that reproduces 0.2's halving exactly.
+    "id": "deck-lengths-1440",
+    "title": "Design lengths, 1440 canvas",
+    "metadata": META,
+    "theme": {"name": "default", "slideWidth": 1440},
+    "slides": [_lengths_slide("s1")],
+}
+
+
+DECKS["aspectRatio4x3"] = {
+    # A 4:3 slide: every Y conversion (text, image box, shape, table) must use
+    # this slide's height, and <p:sldSz> must carry the named screen4x3 type.
+    "id": "deck-4x3",
+    "title": "Four by three",
+    "metadata": META,
+    "theme": {"name": "default", "aspectRatio": 4 / 3},
+    "slides": [
+        {
+            "id": "s1",
+            "layout": "blank",
+            "elements": [
+                {"id": "t", "type": "text", "x": 0.1, "y": 0.5, "w": 0.5, "h": 0.25, "content": "Middle of a 4:3 slide"},
+                {"id": "i", "type": "image", "x": 0.6, "y": 0.1, "w": 0.3, "h": 0.3, "src": PNG_2x1, "fit": "contain"},
+                {"id": "r", "type": "shape", "shape": "rounded-rect", "x": 0.1, "y": 0.8, "w": 0.3, "h": 0.15},
+                {
+                    "id": "tb", "type": "table", "x": 0.5, "y": 0.6, "w": 0.4, "h": 0.3,
+                    "columns": [{"key": "a", "label": "A"}], "rows": [{"a": "1"}],
+                },
+            ],
+        },
+        {
+            "id": "s2",
+            "layout": "blank",
+            "elements": [{"id": "c", "type": "text", "x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5, "content": "Custom 2:1 is a separate deck"}],
+        },
+    ],
+}
+
+
+DECKS["customAspectRatio"] = {
+    # Not a named size: <p:sldSz> leaves `type` off.
+    "id": "deck-2x1",
+    "title": "Two by one",
+    "metadata": META,
+    "theme": {"name": "default", "aspectRatio": 2},
+    "slides": [{"id": "s1", "elements": [{"id": "t", "type": "text", "x": 0.1, "y": 0.5, "w": 0.8, "h": 0.2, "content": "Wide"}]}],
+}
+
+
+DECKS["roundedRects"] = {
+    # Corner radius: min(w, h) * adj / 100000, shared by decorated text boxes and
+    # rounded-rect shapes. A shape without `radius` takes fancy-slides' 8, a
+    # radius of 0 is still a roundRect with adj 0, and an oversize radius pins
+    # to a pill at 50000.
+    "id": "deck-rounded",
+    "title": "Rounded rectangles",
+    "metadata": META,
+    "theme": {"name": "default", "aspectRatio": 16 / 10},
+    "slides": [
+        {
+            "id": "s1",
+            "layout": "blank",
+            "elements": [
+                {"id": "default", "type": "shape", "shape": "rounded-rect", "x": 0.05, "y": 0.05, "w": 0.3, "h": 0.2},
+                {"id": "r20", "type": "shape", "shape": "rounded-rect", "x": 0.4, "y": 0.05, "w": 0.3, "h": 0.2, "radius": 20},
+                {"id": "r0", "type": "shape", "shape": "rounded-rect", "x": 0.05, "y": 0.3, "w": 0.3, "h": 0.2, "radius": 0},
+                {"id": "pill", "type": "shape", "shape": "rounded-rect", "x": 0.4, "y": 0.3, "w": 0.3, "h": 0.1, "radius": 4000},
+                {"id": "plainRect", "type": "shape", "shape": "rect", "x": 0.75, "y": 0.3, "w": 0.2, "h": 0.1, "radius": 30},
+                {
+                    "id": "box", "type": "text", "x": 0.05, "y": 0.6, "w": 0.88, "h": 0.18,
+                    "content": "Decorated", "style": {"fill": "#E8F2F3", "radius": 8},
+                },
+            ],
+        },
+    ],
+}
+
 def _reference_deck() -> dict[str, Any] | None:
     """The rich-constructs reference deck, loaded from the PHP repository.
 

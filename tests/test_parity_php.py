@@ -87,6 +87,43 @@ def test_the_known_divergence_ledger_is_accurate(php_oracle) -> None:
     assert seen == set(KNOWN_DIVERGENT_PARTS), "KNOWN_DIVERGENT_PARTS no longer matches reality"
 
 
+def test_embedded_fonts_emit_the_same_parts(php_oracle, tmp_path) -> None:
+    """Two typefaces, regular and bold, embedded by both engines.
+
+    PHP is given the fonts as FILE PATHS (they cannot travel through its JSON
+    input) and this port the same bytes directly, so any difference is in the
+    EOT wrapper, the part numbering, the relationship ids, the content type or
+    the font list -- every one of which this compares byte for byte, including
+    the binary `.fntdata` parts.
+    """
+    from tests import generated_font as GeneratedFont
+
+    fonts = {
+        "Qvx Display": {
+            "regular": GeneratedFont.build("Qvx Display"),
+            "bold": GeneratedFont.build("Qvx Display", "Bold", fs_type=0x0008, weight=700),
+        },
+        "Qvx Text": {"italic": GeneratedFont.build("Qvx Text", "Italic", italic=True)},
+    }
+    paths: dict[str, dict[str, str]] = {}
+    for typeface, variants in fonts.items():
+        for variant, data in variants.items():
+            path = tmp_path / f"{typeface.replace(' ', '')}-{variant}.ttf"
+            path.write_bytes(data)
+            paths.setdefault(typeface, {})[variant] = str(path)
+
+    deck = DECKS["minimal"]
+    php_parts = php_oracle.parts(php_oracle.php_to_bytes(deck, {"fonts": paths}))
+    py_parts = php_oracle.parts(to_bytes(deck, {"fonts": fonts}))
+
+    assert sorted(py_parts) == sorted(php_parts)
+    assert [p for p in php_parts if p.startswith("ppt/fonts/")] == [
+        "ppt/fonts/font1.fntdata", "ppt/fonts/font2.fntdata", "ppt/fonts/font3.fntdata",
+    ]
+    differing = {p for p in php_parts if php_parts[p] != py_parts[p]}
+    assert differing <= set(KNOWN_DIVERGENT_PARTS), f"embedded-font parts differ from PHP: {sorted(differing)}"
+
+
 def test_compared_something(php_oracle) -> None:
     """The guard the sibling suites lacked.
 

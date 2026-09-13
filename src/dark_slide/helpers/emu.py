@@ -27,9 +27,9 @@ __all__ = [
 
 EMU_PER_INCH = 914400
 
-#: Default 16:9 slide at 10 inches. The writer ALWAYS uses these — a deck's
-#: ``theme.slideWidth`` / ``theme.aspectRatio`` are read by the editor and
-#: ignored here, exactly as in PHP.
+#: Default 16:9 slide at 10 inches. The width is always 10in; the height follows
+#: ``theme.aspectRatio`` (see :mod:`dark_slide.helpers.design_units`), and the
+#: reader takes both from the file's ``<p:sldSz>``, exactly as in PHP.
 DEFAULT_SLIDE_WIDTH = 9144000
 DEFAULT_SLIDE_HEIGHT = 5143500
 
