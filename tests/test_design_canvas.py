@@ -82,6 +82,12 @@ def test_rounds_a_rounded_rect_shape_by_its_radius_in_design_pixels(radius: int 
     assert expected in _parts(_deck({}, shape))["slide"]
 
 
+def test_treats_a_radius_that_is_not_a_number_as_the_default_not_as_square_corners() -> None:
+    # php_float("abc") is 0, which drew a rounded-rect with adj 0: a plain rectangle.
+    shape = {"type": "shape", "shape": "rounded-rect", "w": 0.3, "h": 0.2, "radius": "abc"}
+    assert '<a:gd name="adj" fmla="val 3704"/>' in _parts(_deck({}, shape))["slide"]
+
+
 def test_rounds_a_decorated_text_box_by_the_radius_asked_for() -> None:
     # Ported from PHP RichTextConstructsTest. A 0.88 x 0.18 box on a 16:9 slide
     # has a shorter side of 925830 EMU; 8 design px is 3pt = 38100 EMU;
@@ -117,6 +123,14 @@ def test_reads_a_non_16_9_deck_back_with_its_own_geometry_and_aspect_ratio() -> 
     assert deck["slides"][0]["elements"][0]["y"] == 0.5
     assert deck["slides"][0]["elements"][0]["h"] == 0.25
     assert deck["theme"]["aspectRatio"] == 4 / 3
+
+
+def test_reads_an_aspect_ratio_back_as_a_float_even_when_it_divides_exactly() -> None:
+    # 9144000 / 4572000 is exact; PHP's int division returned int 2, so the port
+    # copied it. Both engines now return a float.
+    ratio = dark_slide.read(dark_slide.to_bytes(_deck({"aspectRatio": 2.0}, {})))["theme"]["aspectRatio"]
+    assert ratio == 2.0
+    assert isinstance(ratio, float)
 
 
 def test_reads_a_16_9_deck_back_without_inventing_an_aspect_ratio() -> None:

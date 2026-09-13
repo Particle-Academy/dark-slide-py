@@ -240,7 +240,8 @@ class PptxReader:
             self._slide_width_emu != Emu.DEFAULT_SLIDE_WIDTH
             or self._slide_height_emu != Emu.DEFAULT_SLIDE_HEIGHT
         ):
-            deck["theme"]["aspectRatio"] = _php_divide(self._slide_width_emu, self._slide_height_emu)
+            # Always a float, as PHP returns it: a 2:1 slide reads back as 2.0.
+            deck["theme"]["aspectRatio"] = self._slide_width_emu / self._slide_height_emu
 
         # Walk the presentation rel list in order — that, not the part names,
         # is what defines slide order.
@@ -780,12 +781,3 @@ def _num_to_str(value: float) -> str:
     if value == int(value):
         return str(int(value))
     return repr(value)
-
-
-def _php_divide(numerator: int, denominator: int) -> int | float:
-    """PHP's ``int / int``: an int when it divides exactly, a float otherwise.
-
-    The reader returns ``theme.aspectRatio`` this way, so a 2:1 slide reads back
-    as ``2`` in both engines rather than ``2`` in PHP and ``2.0`` here.
-    """
-    return numerator // denominator if numerator % denominator == 0 else numerator / denominator

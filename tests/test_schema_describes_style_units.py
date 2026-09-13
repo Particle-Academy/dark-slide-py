@@ -9,7 +9,7 @@ descriptions say so with worked examples.
 Two guarantees:
 
 - the worked examples the descriptions quote are what THIS writer emits;
-- the element position, size, style and outline schema, and the theme's canvas
+- the element position, size, style, outline and radius schema, and the theme's canvas
   fields, are IDENTICAL to the PHP reference's, so the three engines cannot
   describe one field three ways.
 """
@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import subprocess
 import zipfile
 
@@ -95,6 +96,11 @@ def test_the_canvas_is_described() -> None:
     theme = _theme_properties(json_schema())
     assert "1920 by default" in theme["slideWidth"]["description"]
     assert "1440 reproduces" in theme["slideWidth"]["description"]
+    # The three engines publish this text identically and ship different version
+    # numbers, so it must not name one of them.
+    assert re.search(r"\b\d+\.\d+\b", theme["slideWidth"]["description"]) is None
+    radius = _element_properties(json_schema())["radius"]["description"]
+    assert "design pixels" in radius and "8 by default" in radius
     assert "16/9 by default" in theme["aspectRatio"]["description"]
     assert "design pixels" in _element_properties(json_schema())["strokeWidth"]["description"]
 
@@ -122,7 +128,7 @@ def test_position_size_style_outline_and_canvas_match_the_php_reference() -> Non
     assert "fontSize" in _element_properties(reference)["style"].get("properties", {})
     assert "1920" in _theme_properties(reference)["slideWidth"].get("description", "")
 
-    for key in ("x", "y", "w", "h", "style", "strokeWidth"):
+    for key in ("x", "y", "w", "h", "style", "strokeWidth", "radius"):
         assert _element_properties(ours)[key] == _element_properties(reference)[key], f"element.{key} differs from the PHP reference"
     for key in ("slideWidth", "aspectRatio"):
         assert _theme_properties(ours)[key] == _theme_properties(reference)[key], f"theme.{key} differs from the PHP reference"

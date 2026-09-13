@@ -1490,7 +1490,8 @@ class PptxWriter:
         # default 8) instead of PowerPoint's default corner, which it ignored.
         geometry = (
             box_decoration.round_rect_geometry(
-                php_float(_get(element, "radius", 8)),
+                # A radius that is not a number falls back to the default, not to 0.
+                php_float(element["radius"]) if is_numeric(element.get("radius")) else 8.0,
                 Emu.from_frac_x(php_float(_get(element, "w", 0))),
                 Emu.from_frac_y(php_float(_get(element, "h", 0)), self._slide_height_emu),
                 self._deck_theme,

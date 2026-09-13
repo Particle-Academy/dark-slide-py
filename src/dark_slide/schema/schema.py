@@ -97,7 +97,7 @@ class Schema:
                         },
                         "slideWidth": {
                             "type": "number",
-                            "description": "Width of the design canvas in pixels, 1920 by default, as fancy-slides uses it. Every length in the deck (fontSize, strokeWidth, padding and the rest) is a pixel on this canvas and keeps its share of the slide width. 1440 reproduces the text sizes dark-slide wrote before 0.10.",
+                            "description": "Width of the design canvas in pixels, 1920 by default, as fancy-slides uses it. Every length in the deck (fontSize, strokeWidth, padding and the rest) is a pixel on this canvas and keeps its share of the slide width. 1440 reproduces the text sizes of the earlier model, which halved fontSize into points.",
                         },
                         "colors": {
                             "type": "object",
@@ -329,7 +329,10 @@ def _element_json_schema() -> dict[str, Any]:
                 "description": "A shape's outline width in design pixels, 2 by default (0.75pt on the default canvas); 0 for no outline.",
             },
             "dashed": {"type": "boolean"},
-            "radius": {"type": "number"},
+            "radius": {
+                "type": "number",
+                "description": "Corner radius of a rounded-rect shape, in design pixels, 8 by default; capped at half the shorter side. A plain rect has square corners.",
+            },
             "code": {"type": "string"},
             "language": {"type": "string"},
             "codeTheme": {"type": "string"},

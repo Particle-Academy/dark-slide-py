@@ -131,5 +131,18 @@ def parts(data: bytes) -> dict[str, bytes]:
         return {name: archive.read(name) for name in archive.namelist()}
 
 
+def comparable_parts(data: bytes) -> dict[str, str | bytes]:
+    """Parts as they should be COMPARED: ``.xml`` / ``.rels`` as text, the rest raw.
+
+    Decoding every part as UTF-8 with replacement made two different binaries
+    compare equal whenever their invalid sequences mapped to the same U+FFFD,
+    which is most of an image or a font. Only markup is decoded.
+    """
+    return {
+        name: raw.decode("utf-8") if name.endswith((".xml", ".rels")) else raw
+        for name, raw in parts(data).items()
+    }
+
+
 def text_parts(data: bytes) -> dict[str, str]:
     return {name: raw.decode("utf-8", "replace") for name, raw in parts(data).items()}

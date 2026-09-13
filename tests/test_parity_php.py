@@ -14,6 +14,11 @@ fixed 1980-01-01 DOS date through `zipfile`. So the comparison unzips both and
 diffs each part -- which is the real contract anyway, since a reader sees parts
 and never the compression.
 
+Markup parts (`.xml`, `.rels`) are compared as text and every other part --
+media, embedded fonts -- as raw bytes. All parts used to be decoded as UTF-8
+with replacement, and a binary is mostly invalid UTF-8, so two different images
+could decode to the same run of U+FFFD and compare equal.
+
 ## The ledger ratchets both ways
 
 `KNOWN_DIVERGENT_PARTS` is empty on purpose. A NEW divergent part fails, and an
@@ -53,8 +58,8 @@ KNOWN_DIVERGENT_PARTS: dict[str, str] = {
 }
 
 
-def _both(oracle, payload: object) -> tuple[dict[str, str], dict[str, str]]:
-    return oracle.text_parts(oracle.php_to_bytes(payload)), oracle.text_parts(to_bytes(payload))
+def _both(oracle, payload: object) -> tuple[dict[str, str | bytes], dict[str, str | bytes]]:
+    return oracle.comparable_parts(oracle.php_to_bytes(payload)), oracle.comparable_parts(to_bytes(payload))
 
 
 @pytest.mark.parametrize("name", sorted(DECKS))

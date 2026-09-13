@@ -35,9 +35,9 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 - **`theme.aspectRatio` shapes the slide.** It was validated, published in the schema and ignored, so a 4:3 deck came out stretched onto 16:9. The slide stays 10in wide; 16:9, 16:10 and 4:3 get PowerPoint's named `<p:sldSz type>`, any other ratio a custom size.
 
-- **The reader reads geometry against the file's own slide size** (`<p:sldSz>`) instead of assuming 16:9, and returns `theme.aspectRatio` for any other shape (an int when the ratio is whole, as PHP returns it). A 4:3 deck's `y` of 0.5 used to read back as 0.667.
+- **The reader reads geometry against the file's own slide size** (`<p:sldSz>`) instead of assuming 16:9, and returns `theme.aspectRatio` (always a float) for any other shape. A 4:3 deck's `y` of 0.5 used to read back as 0.667.
 
-- **Rounded corners are the radius asked for.** A roundRect corner is `min(w, h) * adj / 100000` (LibreOffice's preset table); decorated text boxes divided by half the shorter side and drew every corner twice as round. `rounded-rect` shapes now take `radius` (design px, default 8) instead of PowerPoint's default corner.
+- **Rounded corners are the radius asked for.** A roundRect corner is `min(w, h) * adj / 100000` (LibreOffice's preset table); decorated text boxes divided by half the shorter side and drew every corner twice as round. `rounded-rect` shapes now take `radius` (design px, default 8, and the default again when `radius` is not a number) instead of PowerPoint's default corner; the element `radius` is described in the published schema.
 
 ### Added
 
@@ -59,6 +59,8 @@ number cannot make a promise the 0.x range does not allow it to keep.
   `read()` reports embedded typefaces and variants in `metadata.embeddedFonts`, never the bytes.
 
   **Nothing changes for a deck written without `fonts`**: same parts, same bytes.
+
+- **The parity suite compares binary parts as bytes.** It decoded every part as UTF-8 with replacement, so two different images, or any two invalid byte sequences, could read equal. Only `.xml` and `.rels` parts are compared as text now; everything else, media included, byte for byte.
 
 - **Parity fixtures** for the default and 1440 canvases, a 4:3 and a custom-ratio slide, rounded rectangles, and a two-typeface font embedding compared as bytes. `scripts/php_tobytes.php` takes an optional options JSON for the last.
 
