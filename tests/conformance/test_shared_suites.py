@@ -34,7 +34,7 @@ import pytest
 
 from dark_slide.helpers.emu import php_round
 from dark_slide.helpers.markdown_inline import tokenize
-from tests.conformance import loader
+import fancy_conformance as loader
 
 # Moved from 0.5.0 with the release that adds `dark-slide/table-cell-model`.
 # The pin was ALREADY stale before that suite existed — fancy-conformance had
@@ -65,7 +65,15 @@ from tests.conformance import loader
 PINNED_SUITE_VERSION = "0.22.0"
 
 
-def test_the_pinned_fixture_version_is_the_one_on_disk() -> None:
+def test_the_pinned_fixture_version_is_the_one_on_disk(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Past pytest's capture: a bare print() in a passing test never reaches the
+    # CI log, which is the one place rules 3 and 4 of fancy-conformance's
+    # runners/README.md need it.
+    with capsys.disabled():
+        print(f"\nfancy-conformance on disk: {loader.version()}, pinned: {PINNED_SUITE_VERSION}")
+
     assert loader.version() == PINNED_SUITE_VERSION, (
         f"fancy-conformance is at {loader.version()}, this port pins "
         f"{PINNED_SUITE_VERSION}. Re-run the suites and move the pin deliberately."
@@ -155,15 +163,21 @@ def test_ci_checks_out_the_fixture_tag_this_suite_pins() -> None:
         )
 
 
-def _summary(suite: str, run_case) -> dict:
+def _summary(suite: str, run_case, capsys: pytest.CaptureFixture[str]) -> dict:
     summary = loader.run_table(suite, run_case)
     # Printed unconditionally. A bare "3 skipped" reads identically to full
     # coverage at a glance.
-    print("\n" + loader.format_summary(summary))
+    # Past pytest's capture: a bare print() in a passing test never reaches the
+    # CI log, which is the one place rules 3 and 4 of fancy-conformance's
+    # runners/README.md need it.
+    with capsys.disabled():
+        print("\n" + loader.format_summary(summary))
     return summary
 
 
-def test_inline_markdown_tokenizing_matches_the_shared_strings_table() -> None:
+def test_inline_markdown_tokenizing_matches_the_shared_strings_table(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     def run(case: dict) -> list[dict]:
         # The table's run shape is {text, b, i, code} and nothing else. Comparing
         # the package's own richer run dicts against it would pass or fail for
@@ -178,12 +192,14 @@ def test_inline_markdown_tokenizing_matches_the_shared_strings_table() -> None:
             for run in tokenize(case["input"]["text"])
         ]
 
-    summary = _summary("shared/strings", run)
+    summary = _summary("shared/strings", run, capsys)
     assert summary["passed"] >= 6, "the strings table barely ran"
     assert summary["ok"], loader.format_summary(summary)
 
 
-def test_round_money_matches_the_shared_decimal_table() -> None:
+def test_round_money_matches_the_shared_decimal_table(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     rows = [c for c in loader.cases("shared/decimal") if c.get("fn") == "roundMoney"]
 
     # If the suite renamed the function, every assertion below would vanish and
@@ -198,6 +214,7 @@ def test_round_money_matches_the_shared_decimal_table() -> None:
         # are excluded from the assertion by the count guard above rather than
         # by faking a pass.
         else c["expected"],
+        capsys,
     )
     assert summary["ok"], loader.format_summary(summary)
 

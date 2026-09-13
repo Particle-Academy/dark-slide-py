@@ -16,9 +16,11 @@ reference. Nothing in this file restates them.
 
 from __future__ import annotations
 
+import pytest
+
 from dark_slide.helpers import emu as Emu
 from dark_slide.table import table_resolver
-from tests.conformance import loader
+import fancy_conformance as loader
 
 SUITE = "dark-slide/table-cell-model"
 
@@ -87,10 +89,14 @@ def test_the_suite_has_rows_to_run() -> None:
     assert {c["fn"] for c in cases} == {"resolvedCell", "gridWidthsEmu"}
 
 
-def test_the_resolver_matches_the_shared_table() -> None:
+def test_the_resolver_matches_the_shared_table(capsys: pytest.CaptureFixture[str]) -> None:
     summary = loader.run_table(SUITE, _run)
     # Printed unconditionally: a bare "3 skipped" reads identically to full
     # coverage at a glance.
-    print("\n" + loader.format_summary(summary))
+    # Past pytest's capture: a bare print() in a passing test never reaches the
+    # CI log, which is the one place rules 3 and 4 of fancy-conformance's
+    # runners/README.md need it.
+    with capsys.disabled():
+        print("\n" + loader.format_summary(summary))
     assert summary["ok"], loader.format_summary(summary)
     assert summary["passed"] >= 20, "the table barely ran"
