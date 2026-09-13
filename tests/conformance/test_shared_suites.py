@@ -44,7 +44,12 @@ from tests.conformance import loader
 # dark-slide/table-cell-model 26. It had gone stale a second time in exactly the
 # way this comment already describes, which is the argument for the test rather
 # than against it.
-PINNED_SUITE_VERSION = "0.20.0"
+#
+# Moved 0.20.0 -> 0.21.2 on 2026-09-13, after re-running all three tables against
+# that checkout: shared/strings 8, shared/decimal 18, dark-slide/table-cell-model
+# 26, nothing failed or skipped. 0.21.x added flow/connector-runs, which this port
+# does not run. Stale a third time, and again the release that moved it was ours.
+PINNED_SUITE_VERSION = "0.21.2"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk() -> None:

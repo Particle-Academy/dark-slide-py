@@ -11,9 +11,21 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-13
+
 ### Fixed
 
+- **The published schema says what unit every `style` field is in.** `json_schema()` exported `style` as a bare `{"type": "object"}`, so a model filling it in had only the key names, and `fontSize` reads as points. It is design pixels on the 1920px fancy-slides canvas, halved into points with an 8pt minimum. In the fancy-labs document lab an agent described its headline as 232pt, and the file it wrote carried 116pt.
+
+  The style object also mixes units: `letterSpacing`, `spaceBefore`, `spaceAfter`, `padding`, `radius` and the border and accent-bar widths are already points, and `lineHeight` is a multiple. Every field now carries a description with a worked example, and `x`, `y`, `w` and `h` say they are fractions of the slide.
+
+  **Upgrade and do nothing.** Descriptions and permissive types only: the validator never reads this export and the writer's bytes are unchanged.
+
+  `tests/test_schema_describes_style_units.py` checks each worked example against this writer's XML and diffs the element position and style schema against the PHP reference (`scripts/php_jsonschema.php`).
+
 - **`VERSION` reads the INSTALLED distribution metadata instead of a literal.** The literal was corrected by hand last release and pinned by a test, which re-syncs the copy rather than removing it. Reading the metadata means there is no second number left to drift.
+
+- **The conformance pin moved from 0.20.0 to 0.21.2.** fancy-conformance 0.21.x shipped while this port still pinned 0.20.0, so its own guard test was red against the fixture checkout CI uses. All three tables were re-run first: `shared/strings` 8, `shared/decimal` 18, `dark-slide/table-cell-model` 26, nothing failed or skipped.
 
 
 ## [0.2.0] - 2026-09-10
