@@ -1,6 +1,6 @@
 # dark-slide
 
-[![Fancy UI suite](art/fancy-ui.svg)](https://particle.academy)
+[![Fancified](art/fancified.svg)](https://particle.academy)
 
 Zero-dependency `.pptx` writer + reader for agentic deck creation. The Python
 mirror of the PHP [`particle-academy/dark-slide`](https://github.com/Particle-Academy/dark-slide)
