@@ -60,9 +60,15 @@ import fancy_conformance as loader
 # nothing failed or skipped, including the rounding ties (a 1-wide rule at
 # 0.375pt is 4763 EMU, 0.6 of letter spacing is 23 hundredths).
 #
+# Moved 0.22.0 -> 0.22.1 on 2026-09-13. That release changed no case and no
+# golden (the Rust loader pins fancy-json by tag, plus docs); re-run first against
+# a v0.22.1 checkout all the same: shared/strings 8, shared/decimal 18,
+# dark-slide/table-cell-model 28, nothing failed or skipped, the same counts CI
+# printed at 0.22.0.
+#
 # CI checks out `ref: v<this>` from .github/workflows/ci.yml. Move the two
 # together; test_ci_checks_out_the_fixture_tag_this_suite_pins fails otherwise.
-PINNED_SUITE_VERSION = "0.22.0"
+PINNED_SUITE_VERSION = "0.22.1"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk(
