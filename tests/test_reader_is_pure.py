@@ -17,25 +17,35 @@ Both halves are asserted without waiting for a clock tick, deliberately: a test
 that reads twice and hopes to straddle a second boundary passes by luck. Same
 bytes agree; different bytes disagree.
 
-**0.3.1's fix was half a fix, and every test in this file passed anyway.** It
-derived the id from the whole package, and the package embeds a clock stamp in
-``docProps/core.xml`` — so the clock read moved from the reader to the WRITER.
-Two reads of one buffer still agreed, which is all these cases asked, while a
-deck saved and re-read got a different id EVERY time instead of one in five.
-That broke pptx version history in a consumer's shipped product.
+**It took three releases to state the property at the right level**, and the
+first two both passed a suite that looked thorough::
 
-The lesson is in the shape of the cases below, not in the fix: every one of them
-read the same buffer twice. A defect one serialisation away was outside what any
-of them could see. ``test_a_save_that_changed_nothing_keeps_the_deck_id`` is the
-case that reaches it.
+    0.3.1  id = digest(whole package)           followed the WRITER's clock
+    0.3.2  id = digest(package minus core.xml)  removed the clock, kept bytes
+    0.3.3  id = digest(the deck read() returns)
+
+The middle one is the instructive failure. Excluding the clock-bearing part
+removed one source of byte variance and left the others: a deck carrying a shape
+or a code block re-serialises to different ``ppt/slides/slideN.xml`` bytes, so
+the id still moved while the structure sat perfectly still. A digest of bytes
+identifies a SERIALISATION; two serialisations of one deck are not byte-equal,
+and no exclusion list was ever going to make them so.
+
+So the property is now: **any two byte layouts that read to the same structure
+get the same id.** Note what that does NOT say — that a file from another
+producer and one of ours "of the same deck" agree. That holds only as far as
+``read()`` normalises them to the same structure, which is not promised.
+``tests/pptx/foreign-libreoffice.pptx`` shows both halves.
 """
 
 from __future__ import annotations
 
 import copy
 import io
+import json
 import re
 import zipfile
+from pathlib import Path
 from typing import Any
 
 from dark_slide import PptxReader, read, to_bytes
@@ -100,6 +110,25 @@ def _nameless_bytes() -> bytes:
 
 NAMELESS = _nameless_bytes()
 
+#: Fixtures live in ``tests/pptx/`` rather than ``tests/fixtures/`` because
+#: ``tests/fixtures.py`` is a MODULE this suite imports. A directory of the same
+#: name resolves today — a regular module outranks a namespace package — but it
+#: stops resolving the moment someone adds an ``__init__.py``, and a trap that
+#: springs on an unrelated edit is not worth the tidier name.
+PPTX_DIR = Path(__file__).parent / "pptx"
+
+#: A ``.pptx`` written by a genuinely independent producer.
+#:
+#: Regenerate with LibreOffice — reproducible, and the reason a binary is
+#: committed rather than a generator nobody can run::
+#:
+#:     soffice --headless --convert-to pptx --outdir <dir> <ours.pptx>
+#:
+#: where ``<ours.pptx>`` is ``to_bytes(foreign-libreoffice-source.json)``. It is
+#: LibreOffice, not PowerPoint; what matters is that the serialisation is not
+#: ours, and its ``<p:cNvPr>`` / part layout / ordering are all its own.
+FOREIGN = (PPTX_DIR / "foreign-libreoffice.pptx").read_bytes()
+
 _MODIFIED = re.compile(r"<dcterms:modified[^>]*>[^<]*</dcterms:modified>")
 
 
@@ -158,20 +187,105 @@ def test_two_different_decks_get_two_different_ids() -> None:
     assert read(BYTES)["id"] != read(to_bytes(changed))["id"]
 
 
-def test_a_renamed_deck_keeps_its_id_because_the_title_is_in_the_excluded_part() -> None:
-    # A consequence of excluding ``docProps/core.xml`` whole, recorded here so it
-    # is a decision rather than something the next person discovers. ``<dc:title>``
-    # shares that part with the save timestamp, so a rename does not move the id
-    # — the returned ``title`` still changes, so a differ still sees the rename,
-    # and treating a renamed deck as the same deck is defensible on its own
-    # terms. Narrowing the exclusion to the two ``<dcterms:*>`` elements would
-    # change this, at the cost of regexing XML inside the digest path in three
-    # engines; measured as unnecessary and deliberately not done.
-    renamed = read(to_bytes({**DECK, "title": "Renamed, same deck"}))
+def test_a_renamed_deck_gets_a_different_id_because_a_title_is_content() -> None:
+    # 0.3.2 did the opposite, as a side effect of excluding ``docProps/core.xml``
+    # whole — ``<dc:title>`` lives in that part. Digesting the deck rather than
+    # the package puts the title back where it belongs: ``read()`` returns it, so
+    # it counts.
+    renamed = read(to_bytes({**DECK, "title": "Renamed, and that is a change"}))
     original = read(BYTES)
 
     assert renamed["title"] != original["title"]
-    assert renamed["id"] == original["id"]
+    assert renamed["id"] != original["id"]
+
+
+def test_two_byte_layouts_of_one_structure_get_the_same_id() -> None:
+    """THE property. Everything else in this file is a corollary of it.
+
+    A shape element is the cheap way to induce it: our own writer does not
+    re-serialise a read-back shape to the same ``ppt/slides/slide1.xml`` bytes,
+    so these two packages genuinely differ on disk while reading to one deck. The
+    byte-difference is asserted first, because a test where the two buffers
+    happened to be identical would pass while proving nothing.
+    """
+    deck = {
+        "id": "two-layouts",
+        "title": "Two Layouts",
+        "theme": {"name": "default"},
+        "slides": [{"id": "s1", "layout": "blank", "elements": [
+            {"id": "r1", "type": "shape", "shape": "rect", "x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3, "fill": "#FF0000"},
+        ]}],
+    }
+
+    layout_a = to_bytes(deck)
+    read_a = read(layout_a)
+    layout_b = to_bytes(read_a)
+    read_b = read(layout_b)
+
+    without_id = lambda d: {k: v for k, v in d.items() if k != "id"}  # noqa: E731
+
+    assert layout_b != layout_a
+    assert without_id(read_b) == without_id(read_a)
+    assert read_b["id"] == read_a["id"]
+
+
+def test_a_foreign_producer_and_our_reserialisation_of_it_read_to_one_id() -> None:
+    """The consumer's production shape.
+
+    Version 1 of a deck is the file a user uploaded, every version after it is
+    ours. So the first edit of every upload diffs a FOREIGN serialisation against
+    one of ours.
+
+    Neither this repo nor its two siblings had a single ``.pptx`` fixture before
+    this one — every fixture was generated by our own writer at test time, which
+    is the same blind spot that left the reader's RNG path unexercised for
+    several minor versions.
+    """
+    first = read(FOREIGN)
+    ours = to_bytes(first)
+    second = read(ours)
+
+    assert first["slides"]
+    assert ours != FOREIGN
+    assert second["id"] == first["id"]
+
+
+def test_it_does_not_claim_a_foreign_file_and_ours_share_an_id() -> None:
+    """The limit of the property, asserted so nobody widens the claim by accident.
+
+    ``read()`` recovers what it can model; LibreOffice's rendering of this deck
+    and ours do not reduce to the same structure, so the two ids differ —
+    correctly. The guarantee is about byte layouts of one STRUCTURE, not about
+    two producers' idea of one deck.
+    """
+    source = json.loads((PPTX_DIR / "foreign-libreoffice-source.json").read_text(encoding="utf-8"))
+
+    assert read(FOREIGN)["id"] != read(to_bytes(source))["id"]
+
+
+def test_only_ascii_keys_appear_which_is_what_lets_three_engines_sort_alike() -> None:
+    """The canonical encoding sorts map keys, and the three engines' sorts agree
+    only below U+10000 (JS sorts UTF-16 code units, PHP bytes, Python code
+    points). Every key a read deck contains is machine-generated, so this is true
+    by construction — checked rather than assumed, because the digest silently
+    depends on it.
+    """
+    keys: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                keys.add(str(key))
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(read(BYTES))
+    walk(read(FOREIGN))
+
+    assert keys
+    assert [k for k in keys if re.search(r"[^\x20-\x7E]", k)] == []
 
 
 def test_the_deck_id_comes_from_the_deck_not_from_when_it_was_saved() -> None:
@@ -196,13 +310,18 @@ def test_a_save_that_changed_nothing_keeps_the_deck_id() -> None:
     it became — so the first read-write-read genuinely changes the deck and is
     supposed to change the id with it. What must hold is that it then stops.
 
-    **This port's own writer cannot produce the failure**, and that is worth
-    knowing rather than hiding behind a green tick: ``_build_core_props`` stamps
-    ``EPOCH_TIMESTAMP`` and honours ``metadata.created``, so it never reads the
-    clock and two saves here are byte-identical. The PHP and Node engines DO
-    stamp the clock, and a Python consumer overwhelmingly reads packages those
-    two wrote — so the second save below is re-stamped, which is what a file
-    round-tripped through either of them actually looks like.
+    **This port's own writer cannot produce the clock half of the failure**, and
+    that is worth knowing rather than hiding behind a green tick:
+    ``_build_core_props`` stamps ``EPOCH_TIMESTAMP`` and honours
+    ``metadata.created``, so it never reads the clock and two saves here are
+    byte-identical for THIS deck. The PHP and Node engines DO stamp the clock,
+    and a Python consumer overwhelmingly reads packages those two wrote — so the
+    second save below is re-stamped, which is what a file round-tripped through
+    either of them actually looks like.
+
+    Byte variance is not only the clock, though, which is the whole lesson of
+    0.3.2: see ``test_two_byte_layouts_of_one_structure_get_the_same_id``, which
+    induces it with a shape and needs no timestamp at all.
     """
     settled = read(to_bytes(read(BYTES)))
 

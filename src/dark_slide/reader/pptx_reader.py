@@ -25,13 +25,21 @@ clock- or RNG-derived field turns a diff of unchanged content into a whole-deck
 replace. Nothing here may put the clock, a random number or the environment
 into a value it returns.
 
-**And reading its OWN clock is only half of that.** A value derived from a part
-the WRITER stamps with the clock is just as impure, one step removed, and it is
-worse: two reads of one buffer agree, so it looks fixed, while a deck serialised
-and re-serialised — a consumer saving a file that changed nothing — diverges
-every single time. That is what 0.3.1 shipped. Anything derived from the package
-must therefore skip the parts that are about the SAVE rather than about the
-deck; see ``_DIGEST_EXCLUDED_PART``.
+**The id is a function of the CONTENT, never of the package bytes.** That
+distinction took three attempts to state correctly, so it is worth being blunt
+about: a digest of the bytes identifies a SERIALISATION, and two serialisations
+of one deck are not byte-equal. 0.3.1 hashed the whole package, which followed
+the writer's clock. 0.3.2 excluded the clock-bearing part, which removed ONE
+source of byte variance and left the rest — a deck carrying a shape or a code
+block still re-serialises to different ``ppt/slides/slideN.xml`` bytes, so the id
+still moved while the structure sat perfectly still. ``_content_digest`` hashes
+what ``read()`` RETURNS.
+
+The consequence to hold on to: **any two byte layouts that read to the same
+structure get the same id.** It does NOT follow that a file from another producer
+and a DarkSlide-authored file of "the same deck" agree — that holds only as far
+as ``read()`` normalises them to the same structure, which is not promised here
+and is not what this guarantees.
 """
 
 from __future__ import annotations
@@ -39,7 +47,9 @@ from __future__ import annotations
 import base64
 import io
 import os
+import math
 import re
+import struct
 import xml.etree.ElementTree as ElementTree
 import zipfile
 import zlib
@@ -52,20 +62,100 @@ __all__ = ["PptxReader"]
 
 _DOCTYPE = re.compile(rb"<!DOCTYPE", re.IGNORECASE)
 
-#: The one part left out of the deck id, because it is the one part that is not
-#: about the deck. ``docProps/core.xml`` carries ``<dcterms:created>`` and
-#: ``<dcterms:modified>``, which the writer stamps from the clock, so it is the
-#: only entry that differs between two serialisations of one deck.
-#:
-#: Measured rather than assumed, and the measurement is why this is exactly one
-#: name long: of a 43-entry package written either side of a second boundary,
-#: ONE entry differed. Do not widen this to a metadata set on suspicion —
-#: ``docProps/app.xml`` and the rest were measured stable, and a speculative
-#: exclusion is a guess someone has to unpick later.
-_DIGEST_EXCLUDED_PART = "docProps/core.xml"
+def _canonicalize(value: Any, feed: Any) -> None:
+    """Feed one value to the digest in a form all three engines agree on.
 
-#: A separator, so a part's name cannot run into its contents in the digest.
-_DIGEST_SEPARATOR = b"\x00"
+    This is a CANONICAL ENCODING and its rules are the contract, not an
+    implementation detail — the PHP and Node engines implement the same one and
+    the reader-parity suite compares the resulting id, so a divergence here is a
+    divergence in the id. Spelled out::
+
+        None            ~
+        True / False    T / F
+        number          # then the eight bytes of the IEEE-754 binary64, big endian
+        str             s, the UTF-8 BYTE length in decimal, :, then the bytes
+        empty [] / {}   e
+        list            [ then each item, then ]
+        dict            { then each key then its value, keys ascending, then }
+
+    Three of those choices are load-bearing:
+
+    **Numbers go in as raw IEEE bits, never as text.** The three languages
+    disagree about the TYPE of a number — PHP's ``int / int`` is an int when it
+    divides exactly, Python's ``/`` is always a float, JS has only doubles — and
+    about how a float RENDERS: PHP's depends on the ``serialize_precision`` ini
+    setting, which a consumer can change underneath us. Bit patterns have no such
+    freedom. Two finite doubles that compare equal have identical bits, and both
+    parity suites already assert the engines read numerically equal values, so
+    agreement here follows from a property that is already tested. ``-0.0`` is
+    the one exception to that and is normalised; non-finite values cannot occur
+    in a deck and are mapped to a marker rather than trusted.
+
+    **Strings are length-prefixed**, so there is no escaping convention for three
+    languages to agree on.
+
+    **An empty list and an empty dict collapse to ONE marker.** PHP cannot tell
+    them apart — ``[]`` is both — so a table row with no cells is ``[]`` there
+    and ``{}`` here. Both parity suites already normalise the two together, which
+    is the estate deciding that distinction is not meaningful; a digest depending
+    on it would depend on something already ruled meaningless.
+
+    Keys are sorted rather than taken in insertion order. Python's ``sorted``
+    is code-point order, which for UTF-8 is PHP's byte order, and matches JS's
+    UTF-16 order for everything below U+10000. Every key a read deck contains is
+    machine-generated ASCII, which the purity suite checks rather than assumes.
+
+    ``bool`` is tested BEFORE ``int``: in Python ``isinstance(True, int)`` is
+    true, so a bool would otherwise be digested as the number 1.
+    """
+    if value is None:
+        feed(b"~")
+        return
+    if value is True:
+        feed(b"T")
+        return
+    if value is False:
+        feed(b"F")
+        return
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if not math.isfinite(number):
+            feed(b"?")
+            return
+        if number == 0.0:
+            # -0.0 and 0.0 are equal but not bit-equal, and either can be
+            # reached. Collapse to +0.0 so the engines cannot disagree.
+            number = 0.0
+        feed(b"#")
+        feed(struct.pack(">d", number))
+        return
+    if isinstance(value, str):
+        raw = value.encode("utf-8")
+        feed(b"s" + str(len(raw)).encode("ascii") + b":")
+        feed(raw)
+        return
+    if isinstance(value, (list, tuple)):
+        if not value:
+            feed(b"e")
+            return
+        feed(b"[")
+        for item in value:
+            _canonicalize(item, feed)
+        feed(b"]")
+        return
+    if isinstance(value, dict):
+        if not value:
+            feed(b"e")
+            return
+        feed(b"{")
+        for key in sorted(value.keys(), key=str):
+            _canonicalize(str(key), feed)
+            _canonicalize(value[key], feed)
+        feed(b"}")
+        return
+
+    # Unreachable for a deck, which is lists, dicts and scalars all the way down.
+    feed(b"?")
 
 
 class _Node:
@@ -207,21 +297,6 @@ class PptxReader:
         #: a 4:3 deck's positions back wrong.
         self._slide_width_emu = Emu.DEFAULT_SLIDE_WIDTH
         self._slide_height_emu = Emu.DEFAULT_SLIDE_HEIGHT
-        #: CRC-32 over the package's entries as eight lowercase hex digits —
-        #: the deck id this read returns. CRC-32 rather than a cryptographic
-        #: digest because all three engines already carry one for the zip
-        #: container itself, so the trio agrees on the id without any of them
-        #: growing a hashing dependency.
-        #:
-        #: It was ``time.time()`` until 0.3.1 and the whole package's bytes
-        #: until 0.3.2. Both were impure; the second was worse. ``time.time()``
-        #: moved only across a tick, so a re-read was wrong about one time in
-        #: five. Hashing the whole file moved the clock read from HERE to the
-        #: writer — ``docProps/core.xml`` is stamped at save time — and the two
-        #: serialisations a round trip compares are always written apart, so it
-        #: diverged 14 times out of 14 and broke pptx version history in a
-        #: consumer's shipped product.
-        self._package_digest = ""
         #: The 1-based number of the slide being parsed, and how many fallback
         #: ids have been minted for it. Together they replace a
         #: ``random.randint()`` fallback for elements whose ``<p:cNvPr>``
@@ -260,27 +335,32 @@ class PptxReader:
                 self._parts = {name: archive.read(name) for name in archive.namelist()}
         except zipfile.BadZipFile as exc:
             raise ValueError("Could not open zip archive.") from exc
-        self._package_digest = self._digest_of_parts()
-        return self._extract()
+        deck = self._extract()
+        # Stamped HERE rather than inside _extract() because _extract() has early
+        # returns for a malformed package, and an id that some return paths skip
+        # is worse than one that is wrong.
+        deck["id"] = "imported-" + self._content_digest(deck)
+        return deck
 
-    def _digest_of_parts(self) -> str:
-        """CRC-32 over every entry of the package except ``_DIGEST_EXCLUDED_PART``.
+    def _content_digest(self, deck: dict[str, Any]) -> str:
+        """The deck id: CRC-32 over a canonical encoding of the DECK.
 
-        Entry names go in alongside their contents, so moving a part cannot
-        leave the id unchanged. The walk is in archive order — ``namelist()``
-        returns the central directory's order, which is what PHP's
-        ``ZipArchive`` and the Node port's zip reader enumerate too. That, plus
-        CRC-32 being the one digest all three already have, is what makes two
-        engines read one file to the same id.
+        Eight lowercase hex digits. Not of the package — see the module note.
+
+        ``id`` is removed first, because it is the value being computed. Nothing
+        else is removed: every other field is either read out of the file or
+        derived deterministically from it (``imported-slide-N``, and an
+        element's positional fallback id), so all of it is content.
         """
+        content = {key: value for key, value in deck.items() if key != "id"}
+
         crc = 0
-        for name, payload in self._parts.items():
-            if name == _DIGEST_EXCLUDED_PART:
-                continue
-            crc = zlib.crc32(name.encode("utf-8"), crc)
-            crc = zlib.crc32(_DIGEST_SEPARATOR, crc)
-            crc = zlib.crc32(payload, crc)
-            crc = zlib.crc32(_DIGEST_SEPARATOR, crc)
+
+        def feed(chunk: bytes) -> None:
+            nonlocal crc
+            crc = zlib.crc32(chunk, crc)
+
+        _canonicalize(content, feed)
 
         return format(crc & 0xFFFFFFFF, "08x")
 
@@ -309,7 +389,10 @@ class PptxReader:
 
     def _extract(self) -> dict[str, Any]:
         deck: dict[str, Any] = {
-            "id": "imported-" + self._package_digest,
+            # Filled in by from_bytes() once the deck is complete — the digest
+            # is over the content, so it cannot exist before the content does.
+            # Declared first so the returned key order is unchanged.
+            "id": "",
             "title": self._read_core_title() or "Imported",
             "theme": {"name": "imported"},
             "slides": [],
