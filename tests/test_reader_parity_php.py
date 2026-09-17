@@ -63,12 +63,6 @@ def _normalize(value: Any) -> Any:
     return value
 
 
-def _strip_volatile(deck: dict[str, Any]) -> dict[str, Any]:
-    out = dict(deck)
-    out.pop("id", None)
-    return out
-
-
 def _php_read(path: Path) -> dict[str, Any]:
     binary = _oracle.php_binary()
     src = _oracle.php_src_root()
@@ -96,7 +90,13 @@ def test_both_readers_recover_the_same_deck(php_oracle, tmp_path, name: str) -> 
     php_deck = _php_read(pptx)
     py_deck = dark_slide.read(payload)
 
-    assert _normalize(_strip_volatile(py_deck)) == _normalize(_strip_volatile(php_deck))
+    # Nothing is stripped. The deck ``id`` used to be, because both readers
+    # minted it from their own clock and the two could not agree — which made
+    # this suite silent about dark-slide#9 for as long as the bug existed. A
+    # comparison that deletes the field it cannot explain asserts nothing about
+    # it. Both engines now derive the id from CRC-32 of the package bytes, so it
+    # is compared like everything else.
+    assert _normalize(py_deck) == _normalize(php_deck)
 
 
 def test_the_reader_comparison_is_not_vacuous(php_oracle, tmp_path) -> None:

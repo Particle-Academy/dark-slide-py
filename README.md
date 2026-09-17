@@ -122,6 +122,16 @@ not. Constructs it cannot model are **skipped, never raised** — a deck out of
 PowerPoint always contains several, and failing the whole import over one of
 them is the wrong trade for a tool an agent drives.
 
+`read()` is a **pure function of its bytes.** The same `.pptx` read twice — in
+the same second or a year apart, on this machine or another — returns an
+identical structure, down to every generated id, so reads can be stored and
+diffed: two reads of unchanged bytes diff to nothing. The deck `id` is
+`imported-<crc32 of the file>`, and an element whose `<p:cNvPr>` carries no
+`name` to borrow one from gets `imported-<slide>-<nth>` from its position in the
+file. Before 0.3.1 the first came from `time.time()` and the second from
+`random.randint()`, so a consumer diffing two reads of an unchanged file saw the
+whole deck replaced.
+
 ---
 
 ## Moving between runtimes

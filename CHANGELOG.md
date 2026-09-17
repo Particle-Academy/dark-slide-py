@@ -11,6 +11,52 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-16
+
+**`read()` is a pure function of its bytes again.** Reading the same `.pptx`
+twice returned two different structures, so a consumer diffing two reads of an
+unchanged file saw the whole deck replaced — a save that changed nothing storing
+the entire deck. Reported against the PHP engine as
+[dark-slide#9](https://github.com/Particle-Academy/dark-slide/issues/9); this
+port had it identically.
+
+All three engines are fixed together: `particle-academy/dark-slide` 0.10.1 and
+`@particle-academy/dark-slide` 0.8.1 ship the same change, and all three now
+derive the deck id the same way, so any two of them read one file to the same id.
+
+### Changed
+
+- **Generated import ids have a new shape.** The deck id is now
+  `imported-<crc32>` — eight hex digits of the file's own CRC-32, from `zlib`
+  rather than any new dependency — and an element whose `<p:cNvPr>` carries no
+  `name` to borrow one from is `imported-<slide>-<nth>`, its position in the
+  file.
+
+  **What to do: almost certainly nothing.** The old values came from
+  `time.time()` and `random.randint()`, so no import id was ever reproducible and
+  nothing could have been keyed on one. Only code that PARSES an import id —
+  expecting exactly six hex digits after `imported-`, say — needs a look.
+
+### Fixed
+
+- **The deck id came from the clock.** `PptxReader` minted it from
+  `time.time()`, so the same file read either side of a second boundary came back
+  with a different id. It also COLLIDED: every deck imported in the same second
+  shared one id.
+
+- **An element with no `<p:cNvPr>` `name` got a random id** —
+  `random.randint(1000, 9999)`, redrawn on EVERY read rather than only across a
+  tick, and therefore the worse half. A deck DarkSlide wrote always names its
+  shapes, so its own output never reached this path and no round-trip test could
+  see it; files from other producers reach it constantly.
+
+- **The reader-parity suite could catch neither**, because it DELETED the deck id
+  before comparing against the PHP oracle. A comparison that drops the field it
+  cannot explain asserts nothing about it, and a parity suite only ever detects
+  DISAGREEMENT — three ports with the same bug agree perfectly. It now compares
+  the id like every other field, and a new `tests/test_reader_is_pure.py` asserts
+  the property directly, including for elements that have no name to borrow.
+
 ## [0.3.0] - 2026-09-13
 
 **BREAKING, for how big things are, not for any API.** Pre-1.0, so this lands in a minor. Ports `particle-academy/dark-slide` 0.10 exactly; the parity suite compares every part against the PHP engine byte for byte, embedded fonts included.

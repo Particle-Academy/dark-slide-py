@@ -16,6 +16,14 @@ do in effect.
 **DOCTYPE is rejected before parsing.** A ``.pptx`` never legitimately carries
 one, and a document type declaration is the entry point for entity-expansion
 attacks. The input here is a file someone uploaded.
+
+**read() is a pure function of its bytes.** The same package read twice — in
+the same second or a year apart, here or on another machine — comes back as an
+identical structure, down to every generated id. That is a contract rather than
+a property of the current code: consumers store reads and diff them, and one
+clock- or RNG-derived field turns a diff of unchanged content into a whole-deck
+replace. Nothing here may put the clock, a random number or the environment
+into a value it returns.
 """
 
 from __future__ import annotations
@@ -23,11 +31,10 @@ from __future__ import annotations
 import base64
 import io
 import os
-import random
 import re
-import time
 import xml.etree.ElementTree as ElementTree
 import zipfile
+import zlib
 from html import unescape
 from typing import Any
 
@@ -177,6 +184,25 @@ class PptxReader:
         #: a 4:3 deck's positions back wrong.
         self._slide_width_emu = Emu.DEFAULT_SLIDE_WIDTH
         self._slide_height_emu = Emu.DEFAULT_SLIDE_HEIGHT
+        #: CRC-32 of the package bytes as eight lowercase hex digits — the deck
+        #: id this read returns. It was ``time.time()`` until 0.3.1, which made
+        #: the id a function of the clock as well as the file: the same deck
+        #: read either side of a tick came back different, so a consumer
+        #: diffing two reads of unchanged bytes saw the whole deck replaced.
+        #: CRC-32 rather than a cryptographic digest because all three engines
+        #: already carry one for the zip container itself, so the trio agrees
+        #: on the id without any of them growing a hashing dependency.
+        self._package_digest = ""
+        #: The 1-based number of the slide being parsed, and how many fallback
+        #: ids have been minted for it. Together they replace a
+        #: ``random.randint()`` fallback for elements whose ``<p:cNvPr>``
+        #: carries no ``name``. Numbering PER SLIDE is deliberate: inserting one
+        #: shape into slide 1 then shifts only slide 1's ids instead of
+        #: renumbering every element after it, which would turn a one-element
+        #: edit into a whole-deck diff — the same failure the clock id caused,
+        #: reached by an edit rather than by time.
+        self._slide_number = 0
+        self._slide_fallback_ids = 0
 
     def read(self, data: bytes | bytearray | str | os.PathLike[str]) -> dict[str, Any]:
         """Read from bytes OR a filesystem path.
@@ -194,6 +220,13 @@ class PptxReader:
             return self.from_bytes(handle.read())
 
     def from_bytes(self, data: bytes) -> dict[str, Any]:
+        # Everything this read returns is derived from these bytes, here or
+        # below. The counters start over on every call because one reader
+        # instance may be handed a second file.
+        self._package_digest = format(zlib.crc32(data) & 0xFFFFFFFF, "08x")
+        self._slide_number = 0
+        self._slide_fallback_ids = 0
+
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 self._parts = {name: archive.read(name) for name in archive.namelist()}
@@ -226,7 +259,7 @@ class PptxReader:
 
     def _extract(self) -> dict[str, Any]:
         deck: dict[str, Any] = {
-            "id": "imported-" + format(int(time.time()) & 0xFFFFFF, "x"),
+            "id": "imported-" + self._package_digest,
             "title": self._read_core_title() or "Imported",
             "theme": {"name": "imported"},
             "slides": [],
@@ -261,6 +294,8 @@ class PptxReader:
             )
             notes = self._read_notes_for(slide_rels)
             self._current_slide_rels = self._parse_slide_rels(slide_rels, slide_target)
+            self._slide_number = i + 1
+            self._slide_fallback_ids = 0
 
             deck["slides"].append(
                 self._parse_slide(slide_xml, f"imported-slide-{i + 1}", notes)
@@ -493,6 +528,18 @@ class PptxReader:
 
     # ── Elements ──────────────────────────────────────────────────────────
 
+    def _next_fallback_id(self, prefix: str = "imported-") -> str:
+        """An id for an element whose ``<p:cNvPr>`` carries no ``name``.
+
+        Its position in the file, as ``imported-<slide>-<nth>``. Callers reach
+        it through ``or``, which does not evaluate it unless the name is
+        genuinely absent, so the numbering stays tied to the file rather than
+        to how many elements were parsed.
+        """
+        self._slide_fallback_ids += 1
+
+        return f"{prefix}{self._slide_number}-{self._slide_fallback_ids}"
+
     def _parse_shape(self, sp: _Node) -> dict[str, Any] | None:
         xfrm = _descendant(sp, "xfrm")
         if xfrm is None:
@@ -504,7 +551,8 @@ class PptxReader:
 
         c_nv_pr = _descendant(sp, "cNvPr")
         base: dict[str, Any] = {
-            "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None) or _fallback_id(),
+            "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None)
+            or self._next_fallback_id(),
             "x": self._frac_x(_to_int(_at(offset, "x"))),
             "y": self._frac_y(_to_int(_at(offset, "y"))),
             "w": self._frac_x(_to_int(_at(extent, "cx"))),
@@ -565,7 +613,8 @@ class PptxReader:
         c_nv_pr = _descendant(pic, "cNvPr")
 
         return {
-            "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None) or _fallback_id(),
+            "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None)
+            or self._next_fallback_id(),
             "type": "image",
             "x": self._frac_x(_to_int(_at(offset, "x"))),
             "y": self._frac_y(_to_int(_at(offset, "y"))),
@@ -635,7 +684,7 @@ class PptxReader:
 
         return {
             "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None)
-            or _fallback_id("imported-table-"),
+            or self._next_fallback_id("imported-table-"),
             "type": "table",
             "x": self._frac_x(_to_int(_at(offset, "x"))),
             "y": self._frac_y(_to_int(_at(offset, "y"))),
@@ -769,11 +818,6 @@ class PptxReader:
             return ("- " + line, True)
 
         return (line, any_decoration)
-
-
-def _fallback_id(prefix: str = "imported-") -> str:
-    """The id used when a shape carries no name. Matches the peers' shape."""
-    return prefix + str(random.randint(1000, 9999))
 
 
 def _num_to_str(value: float) -> str:
