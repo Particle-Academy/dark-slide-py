@@ -102,8 +102,9 @@ uploaded.
   year apart, on any machine — returns an identical structure, down to every
   generated id, because consumers store reads and DIFF them: one clock- or
   RNG-derived field turns a diff of unchanged content into a whole-deck replace.
-  The deck id is CRC-32 of the package bytes; an element whose `<p:cNvPr>`
-  carries no `name` is numbered by its position in the file. Nothing on the read
+  The deck id is CRC-32 over the package's entries EXCEPT `docProps/core.xml`;
+  an element whose `<p:cNvPr>` carries no `name` is numbered by its position in
+  the file. Nothing on the read
   side may put the clock, a random number or the environment into a returned
   value. Guarded by `tests/test_reader_is_pure.py`.
 
@@ -111,6 +112,16 @@ uploaded.
   could see this — a comparison that drops the field it cannot explain asserts
   nothing about it, and all three engines had the same bug, which a suite that
   only detects disagreement will never report.
+
+  **Deriving it from the package is not the same as deriving it from the deck**,
+  and 0.3.1 shipped the difference: the id was CRC-32 of the WHOLE package, and
+  the package embeds a write-time stamp in `docProps/core.xml`. Two reads of one
+  buffer still agreed — so every purity test passed — while a deck saved and
+  re-read got a new id every time, which deterministically broke pptx version
+  history in a consumer's product. The digest now skips that one entry, measured
+  as the only one of 43 that a re-save changes. Its side effect is deliberate and
+  pinned by a test: `<dc:title>` lives there too, so renaming a deck does not
+  change its id.
 
 ### 5. `allow_http_images` defaults to `False`, and stays that way
 

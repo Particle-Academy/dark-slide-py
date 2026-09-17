@@ -24,6 +24,14 @@ a property of the current code: consumers store reads and diff them, and one
 clock- or RNG-derived field turns a diff of unchanged content into a whole-deck
 replace. Nothing here may put the clock, a random number or the environment
 into a value it returns.
+
+**And reading its OWN clock is only half of that.** A value derived from a part
+the WRITER stamps with the clock is just as impure, one step removed, and it is
+worse: two reads of one buffer agree, so it looks fixed, while a deck serialised
+and re-serialised — a consumer saving a file that changed nothing — diverges
+every single time. That is what 0.3.1 shipped. Anything derived from the package
+must therefore skip the parts that are about the SAVE rather than about the
+deck; see ``_DIGEST_EXCLUDED_PART``.
 """
 
 from __future__ import annotations
@@ -43,6 +51,21 @@ from ..helpers import emu as Emu
 __all__ = ["PptxReader"]
 
 _DOCTYPE = re.compile(rb"<!DOCTYPE", re.IGNORECASE)
+
+#: The one part left out of the deck id, because it is the one part that is not
+#: about the deck. ``docProps/core.xml`` carries ``<dcterms:created>`` and
+#: ``<dcterms:modified>``, which the writer stamps from the clock, so it is the
+#: only entry that differs between two serialisations of one deck.
+#:
+#: Measured rather than assumed, and the measurement is why this is exactly one
+#: name long: of a 43-entry package written either side of a second boundary,
+#: ONE entry differed. Do not widen this to a metadata set on suspicion —
+#: ``docProps/app.xml`` and the rest were measured stable, and a speculative
+#: exclusion is a guess someone has to unpick later.
+_DIGEST_EXCLUDED_PART = "docProps/core.xml"
+
+#: A separator, so a part's name cannot run into its contents in the digest.
+_DIGEST_SEPARATOR = b"\x00"
 
 
 class _Node:
@@ -184,14 +207,20 @@ class PptxReader:
         #: a 4:3 deck's positions back wrong.
         self._slide_width_emu = Emu.DEFAULT_SLIDE_WIDTH
         self._slide_height_emu = Emu.DEFAULT_SLIDE_HEIGHT
-        #: CRC-32 of the package bytes as eight lowercase hex digits — the deck
-        #: id this read returns. It was ``time.time()`` until 0.3.1, which made
-        #: the id a function of the clock as well as the file: the same deck
-        #: read either side of a tick came back different, so a consumer
-        #: diffing two reads of unchanged bytes saw the whole deck replaced.
-        #: CRC-32 rather than a cryptographic digest because all three engines
-        #: already carry one for the zip container itself, so the trio agrees
-        #: on the id without any of them growing a hashing dependency.
+        #: CRC-32 over the package's entries as eight lowercase hex digits —
+        #: the deck id this read returns. CRC-32 rather than a cryptographic
+        #: digest because all three engines already carry one for the zip
+        #: container itself, so the trio agrees on the id without any of them
+        #: growing a hashing dependency.
+        #:
+        #: It was ``time.time()`` until 0.3.1 and the whole package's bytes
+        #: until 0.3.2. Both were impure; the second was worse. ``time.time()``
+        #: moved only across a tick, so a re-read was wrong about one time in
+        #: five. Hashing the whole file moved the clock read from HERE to the
+        #: writer — ``docProps/core.xml`` is stamped at save time — and the two
+        #: serialisations a round trip compares are always written apart, so it
+        #: diverged 14 times out of 14 and broke pptx version history in a
+        #: consumer's shipped product.
         self._package_digest = ""
         #: The 1-based number of the slide being parsed, and how many fallback
         #: ids have been minted for it. Together they replace a
@@ -223,7 +252,6 @@ class PptxReader:
         # Everything this read returns is derived from these bytes, here or
         # below. The counters start over on every call because one reader
         # instance may be handed a second file.
-        self._package_digest = format(zlib.crc32(data) & 0xFFFFFFFF, "08x")
         self._slide_number = 0
         self._slide_fallback_ids = 0
 
@@ -232,7 +260,29 @@ class PptxReader:
                 self._parts = {name: archive.read(name) for name in archive.namelist()}
         except zipfile.BadZipFile as exc:
             raise ValueError("Could not open zip archive.") from exc
+        self._package_digest = self._digest_of_parts()
         return self._extract()
+
+    def _digest_of_parts(self) -> str:
+        """CRC-32 over every entry of the package except ``_DIGEST_EXCLUDED_PART``.
+
+        Entry names go in alongside their contents, so moving a part cannot
+        leave the id unchanged. The walk is in archive order — ``namelist()``
+        returns the central directory's order, which is what PHP's
+        ``ZipArchive`` and the Node port's zip reader enumerate too. That, plus
+        CRC-32 being the one digest all three already have, is what makes two
+        engines read one file to the same id.
+        """
+        crc = 0
+        for name, payload in self._parts.items():
+            if name == _DIGEST_EXCLUDED_PART:
+                continue
+            crc = zlib.crc32(name.encode("utf-8"), crc)
+            crc = zlib.crc32(_DIGEST_SEPARATOR, crc)
+            crc = zlib.crc32(payload, crc)
+            crc = zlib.crc32(_DIGEST_SEPARATOR, crc)
+
+        return format(crc & 0xFFFFFFFF, "08x")
 
     # ── Extraction ────────────────────────────────────────────────────────
 
