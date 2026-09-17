@@ -11,6 +11,17 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Documentation: the reader docstring no longer implies this package diffs
+  decks.** It described how a clock- or RNG-derived id "turns a one-element edit
+  into a whole-deck diff" without saying where the differ lives — which reads as
+  a promise that something upstream handles it. ``Differ``, ``Reducer`` and the
+  ``DeckOp`` vocabulary are **PHP-only**; there is no diff surface here. A
+  consumer of this package writes their own comparison and nothing in this repo
+  guards it. What is owed here is a pure ``read()``, and that is now what the
+  docstring claims. Raised by a consumer.
+
 ## [0.3.3] - 2026-09-16
 
 **The third attempt at one defect, and the one that changes its basis.** The

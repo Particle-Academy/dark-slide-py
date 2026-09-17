@@ -25,6 +25,16 @@ clock- or RNG-derived field turns a diff of unchanged content into a whole-deck
 replace. Nothing here may put the clock, a random number or the environment
 into a value it returns.
 
+**That diff is YOURS, not this package's.** ``Differ``, ``Reducer`` and the
+``DeckOp`` vocabulary exist only in the PHP package — there is no diff surface
+here, and nothing in this repo guards the property described above on your
+behalf. This docstring used to describe the failure without saying where the
+differ lived, which reads as a promise that something upstream handles it. It
+does not. What this package owes you is a pure ``read()``; comparing two reads
+is your code, and the guard worth copying is "does the diff mention the part
+that did not change?" — threshold-free, because a whole-deck replace satisfies
+every bound (it is one operation, and smaller than the ``.pptx``).
+
 **The id is a function of the CONTENT, never of the package bytes.** That
 distinction took three attempts to state correctly, so it is worth being blunt
 about: a digest of the bytes identifies a SERIALISATION, and two serialisations
