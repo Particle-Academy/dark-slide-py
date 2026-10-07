@@ -183,7 +183,22 @@ three-way split. The live ones, all with tests:
 | `{"id": null}` in the validator | no error (`isset()` is false for null) | flagged as a type error |
 | non-base64 `data:` URIs | percent-decoded to **bytes** | re-encoded as UTF-8, corrupting binary |
 | intrinsic size of a WebP / BMP | read, so `fit: cover` crops correctly | unread, so it stretches |
-| `option.categories` with no `xAxis` | ignored (a shared wart, pinned) | same |
+| `option.categories` with no `xAxis` | **ignored** — labels fall back to 1, 2, 3 … | **honoured** |
+
+The last row was recorded as *"a shared wart, pinned"* with Node marked `same`.
+**That was never true** — measured 2026-10-07, Node honours `categories` on its
+own because its `candidates` is seeded `null` where PHP and this port seed `[]`,
+and `[]` is already an array so the fallback never fires. So it is a real
+three-way split on a silent path: a chart authored with `categories` and no
+`xAxis` gets real labels from one engine and `1, 2, 3 …` from the other two, with
+nothing raised. It went unseen because the reference deck carries NO CHART, so
+byte parity has never once exercised the translator.
+
+Pinned per engine by `test_chart_option_shape.py` (and its PHP / Node twins) so
+the split is asserted rather than assumed. Which way to resolve it is an owner
+call, not a port's: it changes the rendered output of existing decks in two
+engines. Until then the published schema describes `xAxis.data` and omits
+`categories`, because a contract that is false somewhere should not be published.
 
 ### 9. Every length is a design pixel, converted in ONE place
 

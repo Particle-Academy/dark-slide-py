@@ -36,8 +36,18 @@ class ChartSpec(TypedDict):
     series: list[ChartSeries]
 
 
-def translate(option: dict[str, Any]) -> ChartSpec | None:
-    """Normalise an ECharts option, or ``None`` when nothing is renderable."""
+def translate(option: Any) -> ChartSpec | None:
+    """Normalise an ECharts option, or ``None`` when nothing is renderable.
+
+    Takes ``Any`` rather than a dict on purpose. A deck written by the PHP engine
+    serialises an EMPTY option as ``[]`` -- PHP cannot tell an empty list from an
+    empty map -- and this raised ``AttributeError`` on it while PHP and Node both
+    returned None. One malformed element must degrade to a placeholder, never take
+    down the deck around it.
+    """
+    if not is_plain_object(option):
+        return None
+
     raw_series = _extract_series(option)
     if not raw_series:
         return None
@@ -86,15 +96,19 @@ def _extract_series(option: dict[str, Any]) -> list[Any]:
 
 
 def _extract_categories(option: dict[str, Any]) -> list[str]:
-    """Category labels, with PHP's quirk preserved.
+    """Category labels, with PHP quirk preserved.
 
-    Note the seeding: ``candidates`` starts as an EMPTY ARRAY, and the
-    ``option.categories`` fallback only fires when ``candidates`` is not an
-    array. So ``categories`` is consulted only when an ``xAxis`` **is**
-    present but carries no ``data`` — a deck with ``categories`` and no
-    ``xAxis`` gets ``1, 2, 3…`` labels instead. Both shipped engines behave
-    this way; a port that "fixed" it here would change the bytes of every such
-    chart in one language only.
+    Note the seeding: ``candidates`` starts as an EMPTY LIST, and the
+    ``option.categories`` fallback only fires when ``candidates`` is not a list.
+    So ``categories`` is consulted only when an ``xAxis`` **is** present but
+    carries no ``data``; a deck with ``categories`` and no ``xAxis`` gets
+    ``1, 2, 3…`` labels instead.
+
+    This used to say both shipped engines behaved this way. **They do not.**
+    Measured 2026-10-07: Node seeds ``null``, so it honours ``categories``
+    standalone. The three engines are split on a silent path, and the reference
+    deck carries no chart, so byte parity has never exercised it. See rule 8 in
+    AGENTS.md; resolving it changes existing decks and is an owner call.
     """
     candidates: Any = []
     x_axis = option.get("xAxis")

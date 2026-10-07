@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..util import gettype, is_numeric, is_plain_object, php_string
+from ..helpers.chart_translator import SUPPORTED_TYPES
 from ..table.table_resolver import ROW_KEYS, STYLE_KEYS, normalize_columns
 from .schema import Schema
 
@@ -23,6 +24,34 @@ __all__ = ["Validator"]
 def _err(path: str, expected: str, got: str, value: Any, hint: str) -> dict[str, Any]:
     return {"path": path, "expected": expected, "got": got, "value": value, "hint": hint}
 
+
+def _validate_chart_option(element: dict[str, Any], path: str) -> list[dict[str, Any]]:
+    """A chart element with no ``option`` object at all.
+
+    Mirrors PHP ``Validator::validateChartOption``.
+
+    Deliberately NARROW. An option the translator cannot read is not an error: it
+    falls back to a pre-rendered ``image`` / ``src`` data URI and then to a titled
+    placeholder, which is supported and tested. ``write()`` raises on any error
+    returned here, so flagging the untranslatable case would turn that documented
+    fallback into a hard failure.
+    """
+    option = element.get("option")
+    if is_plain_object(option):
+        return []
+
+    return [
+        _err(
+            f"{path}/option",
+            "object (an ECharts option)",
+            gettype(option),
+            option,
+            "A chart element must have an `option` object. Give `series` a list of "
+            "points with a supported type ("
+            + ", ".join(SUPPORTED_TYPES)
+            + "), or supply a pre-rendered chart as a data: URI in `image`.",
+        )
+    ]
 
 def _validate_table_rows(element: dict[str, Any], path: str) -> list[dict[str, Any]]:
     """A table row that shares no key with any column.
@@ -269,6 +298,9 @@ class Validator:
                             "Code element must have a `code` string.",
                         )
                     )
+
+            elif element_type == "chart":
+                errors.extend(_validate_chart_option(element, path))
 
             elif element_type == "table":
                 errors.extend(_validate_table_rows(element, path))

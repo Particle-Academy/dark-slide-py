@@ -11,6 +11,40 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-07
+
+### Added
+
+- **The published schema now describes a chart ``option``**, mirroring PHP
+  ``Schema::chartOptionJsonSchema()`` byte for byte. It exported
+  ``{"type": "object"}`` and nothing more, so a tool vocabulary generated from
+  ``json_schema()`` could not teach an author what a chart needs -- and the failure
+  is silent in both directions: ECharts draws an EMPTY CANVAS for an option it does
+  not recognise, and this writer leaves a titled PLACEHOLDER the same size as the
+  chart. Asked for in the fancy-slides#14 thread.
+
+- **``validate()`` flags a chart element with no ``option`` object at all**, as
+  PHP's does. Deliberately narrow: an option the translator cannot read is not
+  flagged, because the placeholder is a supported fallback and ``write()`` raises
+  on any validator error.
+
+### Fixed
+
+- **``translate()`` no longer raises on an option that is not a mapping.** It
+  called ``.get`` on whatever it was handed, so an option of ``[]`` -- which is how
+  the PHP engine serialises an EMPTY option, since PHP cannot tell an empty list
+  from an empty map -- raised ``AttributeError`` and took down the whole deck,
+  where PHP and Node both returned None and fell back to a placeholder. One
+  malformed element must never do that.
+
+- **The ``_extract_categories`` docstring said both shipped engines ignored a
+  standalone ``categories``. They do not** -- Node honours it. Measured
+  2026-10-07; the rule 8 ledger in ``AGENTS.md`` carried the same false claim and
+  is corrected. A divergence ledger with a wrong row is worse than none, because it
+  is the one place someone checks before trusting the trio. Pinned by a test here
+  and in both sibling engines; resolving it changes existing decks and is the
+  owner's call.
+
 ## [0.4.0] - 2026-10-07
 
 ### Added

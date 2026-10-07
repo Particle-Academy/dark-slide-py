@@ -12,6 +12,78 @@ from typing import Any
 __all__ = ["Schema"]
 
 
+def _chart_option_json_schema() -> dict[str, Any]:
+    """A chart ELEMENT's `option`, with the translatable surface published. Mirrors
+    PHP `Schema::chartOptionJsonSchema()` byte for byte.
+    
+    This said `{ type: "object" }` and nothing more, and it ends in the same silent
+    failure as a mis-shaped table row: the React renderer hands `option` straight to
+    ECharts, which draws an EMPTY CANVAS for a shape it does not recognise, and this
+    writer hands it to the chart translator, which returns null for anything it
+    cannot read and leaves a titled placeholder. Full size, no data, no error.
+    
+    `categories` is deliberately absent: the engines do not agree on it (this one
+    honours it standalone, PHP and Python read it only alongside an `xAxis` without
+    `data`), and publishing a contract that is false somewhere is worse than
+    publishing the portable one, `xAxis.data`.
+    """
+    return {
+        "type": "object",
+        "description": "An Apache ECharts option object. The React renderer passes it to ECharts verbatim, so any valid ECharts option works on screen. This writer renders a NATIVE pptx chart from the subset described here -- series of type bar / line / pie / scatter -- and anything it cannot read falls back, in order, to a pre-rendered chart image taken from the element's `image` or `src` (a data: URI) and then to a titled PLACEHOLDER box. The placeholder is the same size as the chart and carries no data, so an option this writer cannot read looks like a rendering bug rather than an authoring one: prefer the shape below, or supply `image`.",
+        "properties": {
+            "series": {
+                "type": "array",
+                "description": "REQUIRED for a native chart: the data to plot. One series object, or a list of them. An option with no series renders an empty canvas in the browser and a placeholder in the file.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["bar", "line", "pie", "scatter"],
+                            "description": "The chart kind, defaulting to bar when absent. A type outside this list -- radar, gauge, treemap, any other ECharts type -- renders in the browser but makes the WHOLE option untranslatable here, placeholder included: supply `image` as well if you need one.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "The series label, shown in the legend.",
+                        },
+                        "data": {
+                            "type": "array",
+                            "description": "The points. A bare number, or {\"value\": number}; for a pie, {\"name\": string, \"value\": number}, whose names become the category labels; for a scatter, {\"value\": [x, y]}. A point this writer cannot read makes the option untranslatable.",
+                        },
+                        "smooth": {
+                            "type": "boolean",
+                            "description": "Line series only: curve the line.",
+                        },
+                        "areaStyle": {
+                            "type": "object",
+                            "description": "Line series only: fill under the line. Its PRESENCE is what this writer reads -- the styling inside it is browser-only, so an empty object is enough.",
+                        },
+                    },
+                },
+            },
+            "xAxis": {
+                "type": ["object", "array"],
+                "description": "Category labels come from `xAxis.data` (or `xAxis[0].data` when given as a list). Absent, the categories are numbered 1, 2, 3 ... -- which is the quiet way a chart ends up correct but unreadable. A pie takes its labels from the point names instead.",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "description": "The category labels, in order, one per point in each series.",
+                    },
+                },
+            },
+            "title": {
+                "type": ["object", "array"],
+                "description": "The chart title, read from `title.text` (or `title[0].text` when given as a list). It is also what labels the placeholder box if the option cannot be translated, so it is worth setting even on a chart this writer cannot render.",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The title text.",
+                    },
+                },
+            },
+        },
+    }
+
 def _table_columns_json_schema() -> dict[str, Any]:
     """A table COLUMN, with the item shape published.
 
@@ -411,7 +483,7 @@ def _element_json_schema() -> dict[str, Any]:
             "codeTheme": {"type": "string"},
             "columns": _table_columns_json_schema(),
             "rows": _table_rows_json_schema(),
-            "option": {"type": "object"},
+            "option": _chart_option_json_schema(),
             "chartTheme": {"type": "string"},
             "animation": {
                 "type": "object",
