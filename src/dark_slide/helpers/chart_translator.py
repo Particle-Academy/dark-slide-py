@@ -17,6 +17,15 @@ __all__ = ["SUPPORTED_TYPES", "ChartSeries", "ChartSpec", "translate"]
 
 #: Series types with a native OOXML equivalent. Anything else fails the whole
 #: translation — one unsupported series means the chart degrades as a unit.
+#:
+#: WIDENING IS SAFE, NARROWING IS BREAKING, and not only for our own output: the
+#: list is published in the deck schema as `option.series.items.type`'s enum, and a
+#: consumer generating their writer vocabulary from that schema guards it — their
+#: craft guidance tells authoring agents to stay inside these four, because a type
+#: outside them makes the WHOLE option untranslatable and leaves a same-sized
+#: placeholder box with a file still written and nothing raised. Drop one and their
+#: test goes red before a writer finds out, which is the arrangement working; add
+#: one and nothing breaks anywhere.
 SUPPORTED_TYPES = ["bar", "line", "pie", "scatter"]
 
 
