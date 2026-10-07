@@ -314,18 +314,19 @@ def test_the_title_comes_from_option_title_text() -> None:
     assert spec["title"] == "Quarterly"
 
 
-def test_option_categories_are_only_read_when_an_xaxis_exists() -> None:
-    """A shared wart, pinned rather than fixed.
+def test_option_categories_are_read_with_or_without_an_xaxis() -> None:
+    """Was "a shared wart, pinned rather than fixed" — and the claim under it,
+    that both shipped engines behaved this way, was never true.
 
-    ``extractCategories`` seeds its candidate with an EMPTY ARRAY and only
-    falls back to ``option.categories`` when the candidate is NOT an array —
-    so a deck with ``categories`` and no ``xAxis`` silently gets 1, 2, 3…
-    labels. Both shipped engines do this. Changing it here alone would change
-    the bytes of every such chart in one language.
+    ``_extract_categories`` seeded its candidate with an EMPTY LIST and only fell
+    back to ``option.categories`` when the candidate was NOT a list, so a deck
+    with ``categories`` and no ``xAxis`` silently got 1, 2, 3… labels here and in
+    PHP. Node seeded ``None`` and honoured it. Measured 2026-10-07; the owner
+    ruled that the two should match Node.
     """
     without_axis = translate({"categories": ["a", "b"], "series": [{"type": "bar", "data": [1, 2]}]})
     assert without_axis is not None
-    assert without_axis["categories"] == []
+    assert without_axis["categories"] == ["a", "b"]
 
     with_axis = translate(
         {"xAxis": {}, "categories": ["a", "b"], "series": [{"type": "bar", "data": [1, 2]}]}
@@ -333,6 +334,16 @@ def test_option_categories_are_only_read_when_an_xaxis_exists() -> None:
     assert with_axis is not None
     assert with_axis["categories"] == ["a", "b"]
 
+    # `xAxis.data` still wins where both are given.
+    both = translate(
+        {
+            "xAxis": {"data": ["Q1", "Q2"]},
+            "categories": ["a", "b"],
+            "series": [{"type": "bar", "data": [1, 2]}],
+        }
+    )
+    assert both is not None
+    assert both["categories"] == ["Q1", "Q2"]
 
 # ── Color ─────────────────────────────────────────────────────────────────
 

@@ -96,21 +96,16 @@ def _extract_series(option: dict[str, Any]) -> list[Any]:
 
 
 def _extract_categories(option: dict[str, Any]) -> list[str]:
-    """Category labels, with PHP quirk preserved.
+    """Category labels, from ``xAxis.data``, ``xAxis[0].data`` or ``categories``.
 
-    Note the seeding: ``candidates`` starts as an EMPTY LIST, and the
-    ``option.categories`` fallback only fires when ``candidates`` is not a list.
-    So ``categories`` is consulted only when an ``xAxis`` **is** present but
-    carries no ``data``; a deck with ``categories`` and no ``xAxis`` gets
-    ``1, 2, 3…`` labels instead.
-
-    This used to say both shipped engines behaved this way. **They do not.**
-    Measured 2026-10-07: Node seeds ``null``, so it honours ``categories``
-    standalone. The three engines are split on a silent path, and the reference
-    deck carries no chart, so byte parity has never exercised it. See rule 8 in
-    AGENTS.md; resolving it changes existing decks and is an owner call.
+    The seed is ``None`` and NOT ``[]``, which is the whole of the fix the owner
+    ruled on 2026-10-07: ``[]`` is already a list, so the ``categories`` fallback
+    could only fire when an ``xAxis`` was present WITHOUT ``data``, and a deck
+    using ``categories`` alone silently got ``1, 2, 3 ...`` labels. Node seeded
+    ``None`` and honoured it, so the trio was split three ways on a path byte
+    parity never reaches -- the reference deck carries no chart.
     """
-    candidates: Any = []
+    candidates: Any = None
     x_axis = option.get("xAxis")
     if isinstance(x_axis, (list, dict)):
         if isinstance(x_axis, list) and x_axis and isinstance(x_axis[0], (list, dict)):

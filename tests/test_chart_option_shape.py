@@ -77,13 +77,7 @@ def test_describes_every_option_key_the_translator_reads() -> None:
 
     described = _option()["properties"]
     for key in read:
-        # `categories` is deliberately NOT described: the Node engine honours it
-        # standalone while this one reads it only alongside an `xAxis` without
-        # `data`. Publishing a key three engines disagree on would make the
-        # schema false somewhere.
-        if key == "categories":
-            assert "categories" not in described
-            continue
+
         assert key in described, key
         assert described[key].get("description", "") != "", key
 
@@ -154,25 +148,27 @@ def test_does_not_flag_an_option_it_cannot_translate() -> None:
     assert to_bytes(deck)
 
 
-def test_pins_the_three_way_split_on_categories_with_no_xaxis() -> None:
-    """Measured 2026-10-07.
+def test_honours_a_standalone_categories_as_all_three_engines_now_do() -> None:
+    """Was a three-way split until 2026-10-07.
 
-    This engine IGNORES a standalone ``categories`` -- ``_extract_categories``
-    seeds its candidates with ``[]``, which is already a list, so the fallback
-    never fires -- and so does PHP, while Node honours it. A chart authored that
-    way gets real labels from one engine and ``1, 2, 3 ...`` from the other two,
-    silently, and the reference deck carries no chart so byte parity has never
-    seen it.
-
-    Pinned rather than fixed: resolving it changes the rendered output of existing
-    decks, which is the owner's call. When it is made this fails in whichever
-    engine moves, which is exactly what should happen.
+    This engine and PHP seeded their candidate list with ``[]`` -- already a list,
+    so the ``categories`` fallback never fired and a deck using it alone got
+    ``1, 2, 3 ...`` labels -- while Node seeded ``None`` and honoured it. Invisible
+    to byte parity, which never reaches the translator because the reference deck
+    carries no chart. The owner ruled that the two should match Node.
     """
     spec = translate({"categories": ["Q1", "Q2"], "series": [{"type": "bar", "data": [1, 2]}]})
     assert spec is not None
-    assert spec["categories"] == []
+    assert spec["categories"] == ["Q1", "Q2"]
 
-    # And the form that IS portable, published in the schema, does work.
-    portable = translate({"xAxis": {"data": ["Q1", "Q2"]}, "series": [{"type": "bar", "data": [1, 2]}]})
-    assert portable is not None
-    assert portable["categories"] == ["Q1", "Q2"]
+    # `xAxis.data` still wins where both are given: it is the ECharts key, and the
+    # only one a browser renderer reads.
+    both = translate(
+        {
+            "categories": ["ignored", "also ignored"],
+            "xAxis": {"data": ["Q1", "Q2"]},
+            "series": [{"type": "bar", "data": [1, 2]}],
+        }
+    )
+    assert both is not None
+    assert both["categories"] == ["Q1", "Q2"]

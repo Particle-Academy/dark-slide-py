@@ -11,6 +11,23 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-07
+
+### Changed
+
+- **``option.categories`` is now honoured on its own**, matching the Node engine
+  and the PHP reference. It was read only when an ``xAxis`` was present WITHOUT
+  ``data``, because the candidate list was seeded ``[]`` -- already a list, so the
+  fallback could not fire -- and a chart authored with ``categories`` alone
+  silently got ``1, 2, 3 ...`` labels.
+
+  **This changes rendered output**: a chart relying on ``categories`` gains its
+  real labels. Nothing else moves, and ``xAxis.data`` still wins where both are
+  given. Owner ruling, 2026-10-07, which also retires the rule 8 divergence row --
+  the one that was recorded with Node marked ``same`` when it never was.
+
+  The schema describes ``categories`` as of this release.
+
 ## [0.5.0] - 2026-10-07
 
 ### Added

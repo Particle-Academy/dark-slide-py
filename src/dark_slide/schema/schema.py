@@ -13,19 +13,21 @@ __all__ = ["Schema"]
 
 
 def _chart_option_json_schema() -> dict[str, Any]:
-    """A chart ELEMENT's `option`, with the translatable surface published. Mirrors
-    PHP `Schema::chartOptionJsonSchema()` byte for byte.
-    
-    This said `{ type: "object" }` and nothing more, and it ends in the same silent
-    failure as a mis-shaped table row: the React renderer hands `option` straight to
-    ECharts, which draws an EMPTY CANVAS for a shape it does not recognise, and this
-    writer hands it to the chart translator, which returns null for anything it
-    cannot read and leaves a titled placeholder. Full size, no data, no error.
-    
-    `categories` is deliberately absent: the engines do not agree on it (this one
-    honours it standalone, PHP and Python read it only alongside an `xAxis` without
-    `data`), and publishing a contract that is false somewhere is worse than
-    publishing the portable one, `xAxis.data`.
+    """A chart ELEMENT's ``option``, with the translatable surface published.
+
+    Mirrors PHP ``Schema::chartOptionJsonSchema()`` byte for byte.
+
+    This said ``{"type": "object"}`` and nothing more, and it ends in the same
+    silent failure as a mis-shaped table row: the React renderer hands ``option``
+    straight to ECharts, which draws an EMPTY CANVAS for a shape it does not
+    recognise, and this writer hands it to the chart translator, which returns
+    None for anything it cannot read and leaves a titled placeholder. Full size,
+    no data, no error.
+
+    ``categories`` is described as of 0.6.0. It was withheld while the engines
+    disagreed -- this one and PHP ignored it, Node honoured it -- because a
+    contract that is false somewhere should not be published. The owner ruled on
+    2026-10-07 that the two should match Node, so it is now true everywhere.
     """
     return {
         "type": "object",
@@ -70,6 +72,10 @@ def _chart_option_json_schema() -> dict[str, Any]:
                         "description": "The category labels, in order, one per point in each series.",
                     },
                 },
+            },
+            "categories": {
+                "type": "array",
+                "description": "A shorthand for the category labels, equivalent to `xAxis.data` and read only when that is absent. NOT an ECharts key -- ECharts itself ignores it, so a chart relying on it comes out labelled in a pptx export and numbered 1, 2, 3 ... in a browser renderer. `xAxis.data` is the form both ends read; prefer it.",
             },
             "title": {
                 "type": ["object", "array"],
