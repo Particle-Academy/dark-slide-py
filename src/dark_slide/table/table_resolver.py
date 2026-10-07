@@ -54,10 +54,16 @@ DEFAULT_PADDING_Y = 3.6
 DEFAULT_HEADER_HEIGHT = 40
 DEFAULT_BODY_HEIGHT = 30
 
-_STYLE_KEYS = (
+# Published because a row carrying ONLY these is a styled row with no cell values
+# rather than a row keyed wrongly, and the validator has to tell those apart. A
+# second copy of this list over there would be a list that drifts.
+STYLE_KEYS = (
     "fill", "color", "bold", "italic", "underline", "align", "anchor",
     "fontSize", "letterSpacing", "caps", "fontFamily", "padding", "borders",
 )
+
+#: Row-level keys that are never cell values. Mirrors PHP ``TableResolver::ROW_KEYS``.
+ROW_KEYS = ("cells", "height")
 
 _CELL_SPEC_KEYS = (
     "text", "colSpan", "rowSpan", "fill", "color", "bold", "italic", "underline",
@@ -224,6 +230,30 @@ def column_widths_emu(columns: list[dict[str, Any]], total_emu: int) -> list[int
 # ── The grid ──────────────────────────────────────────────────────────────
 
 
+def _cell_map(row: Any, columns: list[dict[str, Any]]) -> dict[str, Any]:
+    """One row as cell values keyed by column key. Mirrors PHP ``TableResolver::cellMap``.
+
+    A row is canonically an object keyed by each column key. A row given as a LIST
+    is POSITIONAL: its values are read in column order. That form used to be
+    dropped from the deck entirely here -- ``is_plain_object([...])`` is false, so
+    the loop skipped it -- while PHP kept it and emitted a row of empty cells.
+    Three engines held to byte-identical OOXML disagreed on the ROW COUNT of the
+    same deck, with nothing raised anywhere. Reported as fancy-slides#14.
+
+    Surplus values have nowhere to go and are dropped; columns past the last value
+    resolve to empty, exactly as a missing key does.
+    """
+    inner: Any = row
+    if is_plain_object(row):
+        cells = row.get("cells")
+        if is_plain_object(cells) or isinstance(cells, list):
+            inner = cells
+
+    if not isinstance(inner, list):
+        return inner
+
+    return {col["key"]: value for col, value in zip(columns, inner)}
+
 def _build_grid(
     columns: list[dict[str, Any]], raw_rows: list[Any], has_header: bool
 ) -> list[dict[str, Any]]:
@@ -246,10 +276,12 @@ def _build_grid(
         )
 
     for row in raw_rows:
-        if not is_plain_object(row):
+        # A LIST row is positional, not invalid: `continue` here dropped it from
+        # the deck outright, while PHP kept it and emitted empty cells. See
+        # _cell_map().
+        if not is_plain_object(row) and not isinstance(row, list):
             continue
-        cell_map = row.get("cells")
-        cell_map = cell_map if is_plain_object(cell_map) else row
+        cell_map = _cell_map(row, columns)
         grid.append(
             {
                 "source": row,
@@ -457,7 +489,7 @@ def _style_keys(source: Any) -> dict[str, Any]:
     """
     if not is_plain_object(source):
         return {}
-    return {k: source[k] for k in _STYLE_KEYS if k in source and source[k] is not None}
+    return {k: source[k] for k in STYLE_KEYS if k in source and source[k] is not None}
 
 
 def _row_height(

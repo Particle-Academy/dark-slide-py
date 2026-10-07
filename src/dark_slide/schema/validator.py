@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..util import gettype, is_numeric, is_plain_object, php_string
+from ..table.table_resolver import ROW_KEYS, STYLE_KEYS, normalize_columns
 from .schema import Schema
 
 __all__ = ["Validator"]
@@ -22,6 +23,59 @@ __all__ = ["Validator"]
 def _err(path: str, expected: str, got: str, value: Any, hint: str) -> dict[str, Any]:
     return {"path": path, "expected": expected, "got": got, "value": value, "hint": hint}
 
+
+def _validate_table_rows(element: dict[str, Any], path: str) -> list[dict[str, Any]]:
+    """A table row that shares no key with any column.
+
+    Mirrors PHP ``Validator::validateTableRows``.
+
+    Every cell resolves to nothing and the table still draws at FULL SIZE, because
+    its geometry comes from the columns and the row count. The result is a
+    correctly-shaped grid with every cell blank and nothing raised anywhere -- the
+    same class of wrong as the items-less composite, and it reached a customer as a
+    table whose rows were empty (fancy-slides#14).
+
+    Three shapes are NOT this and must not be flagged: a POSITIONAL row (a list,
+    read in column order), a partially-filled row (a missing cell is simply empty),
+    and a row carrying only row-level style. Only an object row that matches NOTHING
+    is unrecoverable -- in practice a mis-cased or renamed key, which is why the hint
+    names the keys that would work.
+    """
+    rows = element.get("rows")
+    raw_columns = element.get("columns")
+    if not isinstance(rows, list) or not isinstance(raw_columns, list) or not raw_columns:
+        return []
+
+    keys = [c["key"] for c in normalize_columns(raw_columns)]
+    ignored = (*STYLE_KEYS, *ROW_KEYS)
+    errors: list[dict[str, Any]] = []
+
+    for i, row in enumerate(rows):
+        if not is_plain_object(row):
+            continue
+        cells = row.get("cells")
+        inner = cells if is_plain_object(cells) or isinstance(cells, list) else row
+        if isinstance(inner, list):
+            continue  # positional, read in column order
+
+        claimed = [k for k in inner if k not in ignored]
+        if not claimed or any(k in keys for k in claimed):
+            continue
+
+        errors.append(
+            _err(
+                f"{path}/rows/{i}",
+                "at least one key from: " + " / ".join(keys),
+                "keys: " + " / ".join(claimed),
+                row,
+                "No column reads anything from this row, so every cell would render "
+                "empty at full table size. Key each cell by a column key ("
+                + ", ".join(keys)
+                + "), or give the row as a positional list in column order.",
+            )
+        )
+
+    return errors
 
 class Validator:
     """Validate a deck. Returns ``[]` when it is writable."""
@@ -215,6 +269,9 @@ class Validator:
                             "Code element must have a `code` string.",
                         )
                     )
+
+            elif element_type == "table":
+                errors.extend(_validate_table_rows(element, path))
 
             elif element_type in ("kpiBand", "metadataGrid"):
                 # An items-less composite is not an error the writer can see: it

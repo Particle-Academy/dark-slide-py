@@ -126,9 +126,16 @@ def test_position_size_style_outline_and_canvas_match_the_php_reference() -> Non
 
     # The comparison has to be over something, or it passes on two empty exports.
     assert "fontSize" in _element_properties(reference)["style"].get("properties", {})
+    assert "key" in _element_properties(reference)["columns"]["items"]["properties"]
     assert "1920" in _theme_properties(reference)["slideWidth"].get("description", "")
 
-    for key in ("x", "y", "w", "h", "style", "strokeWidth", "radius"):
+    # EVERY element property, not a hand list. The list used to name seven keys, so
+    # `columns` and `rows` -- the two this suite would most have wanted to see --
+    # sat outside it and went years undescribed in all three engines with the check
+    # green. A hand list of fields to compare is a check that stops checking the
+    # moment a field is added.
+    assert sorted(_element_properties(ours)) == sorted(_element_properties(reference))
+    for key in _element_properties(reference):
         assert _element_properties(ours)[key] == _element_properties(reference)[key], f"element.{key} differs from the PHP reference"
     for key in ("slideWidth", "aspectRatio"):
         assert _theme_properties(ours)[key] == _theme_properties(reference)[key], f"theme.{key} differs from the PHP reference"

@@ -12,6 +12,79 @@ from typing import Any
 __all__ = ["Schema"]
 
 
+def _table_columns_json_schema() -> dict[str, Any]:
+    """A table COLUMN, with the item shape published.
+
+    Mirrors PHP ``Schema::tableColumnsJsonSchema()`` BYTE FOR BYTE --
+    test_schema_describes_style_units.py compares the two, because three engines
+    describing one field three ways is the drift this trio exists to prevent.
+
+    This said ``{"type": "array"}`` and nothing more until 0.3.3. The fact that a
+    column key is what every row is keyed BY was readable only from the resolver
+    source, so a tool vocabulary generated from this schema could not carry it.
+    """
+    return {
+        "type": "array",
+        "description": "The table columns, in display order. A column is an object, and `key` is required.",
+        "items": {
+            "type": "object",
+            "required": ["key"],
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "The key this column reads from each row object: `rows: [{\"<key>\": \"value\"}]`. Never displayed -- `label` is what the header shows.",
+                },
+                "label": {
+                    "type": "string",
+                    "description": "The header text for this column. Falls back to `key` when absent.",
+                },
+                "width": {
+                    "type": "number",
+                    "description": "Column width. Every declared width <= 1 makes them FRACTIONS of the table and columns without one share the remainder; any declared width > 1 makes them WEIGHTS and columns without one weigh 1. No width anywhere is an equal split.",
+                },
+                "align": {
+                    "type": "string",
+                    "enum": ["left", "center", "right", "justify"],
+                    "description": "Horizontal alignment for the whole column. A row or a cell overrides it.",
+                },
+                "anchor": {
+                    "type": "string",
+                    "enum": ["top", "middle", "bottom"],
+                    "description": "Vertical alignment for the whole column. A row or a cell overrides it.",
+                },
+            },
+        },
+    }
+
+
+def _table_rows_json_schema() -> dict[str, Any]:
+    """A table ROW, with both accepted item shapes published.
+
+    Mirrors PHP ``Schema::tableRowsJsonSchema()`` byte for byte.
+
+    Publishing only ``{"type": "array"}`` was the whole of fancy-slides#14. The
+    canonical row is an object keyed by each column key; the natural guess from a
+    bare column list is a positional row; and that guess failed SILENTLY -- here
+    the row was DROPPED entirely, in PHP it rendered a row of empty cells, and the
+    grid still drew at full size either way.
+    """
+    return {
+        "type": "array",
+        "description": "The table body rows. The header row is generated from the column labels and is NOT listed here.",
+        "items": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "description": "The canonical row: one entry per column `key` -- {\"plan\": \"Starter\", \"price\": \"$49\"}. A cell value is a scalar, or a cell spec object ({text, colSpan, rowSpan, fill, bold, align, ...}). A column with no entry renders as an empty cell. Row-level style keys (fill, color, bold, italic, underline, align, anchor, fontSize, letterSpacing, caps, fontFamily, padding, borders) and `height` style the whole row -- put the cell values under `cells` when a column key would collide with one of those.",
+                },
+                {
+                    "type": "array",
+                    "description": "A positional row: the values in COLUMN ORDER, read as columns[i].key. [\"Starter\", \"$49\"] means exactly {\"plan\": \"Starter\", \"price\": \"$49\"} when the columns are [{\"key\": \"plan\"}, {\"key\": \"price\"}]. Values past the last column are ignored, and columns past the last value render empty. Prefer the keyed form: it survives a column reorder, and it is the only one that can also carry row-level style.",
+                },
+            ],
+        },
+    }
+
 class Schema:
     """Namespace of deck constants. Never instantiated — a mirror of the PHP class."""
 
@@ -336,8 +409,8 @@ def _element_json_schema() -> dict[str, Any]:
             "code": {"type": "string"},
             "language": {"type": "string"},
             "codeTheme": {"type": "string"},
-            "columns": {"type": "array"},
-            "rows": {"type": "array"},
+            "columns": _table_columns_json_schema(),
+            "rows": _table_rows_json_schema(),
             "option": {"type": "object"},
             "chartTheme": {"type": "string"},
             "animation": {

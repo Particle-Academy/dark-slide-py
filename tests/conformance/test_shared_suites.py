@@ -66,9 +66,18 @@ import fancy_conformance as loader
 # dark-slide/table-cell-model 28, nothing failed or skipped, the same counts CI
 # printed at 0.22.0.
 #
+# Moved 0.22.1 -> 0.34.0 on 2026-10-07, with the positional table row. That
+# release added dark-slide/table-cell-model 0029-0033, which pin a row given as a
+# LIST: this port DROPPED such a row from the deck entirely while PHP kept it and
+# emptied it, so one deck came out with a different row count per engine and
+# nothing here covered it (fancy-slides#14). Re-run first against this port's
+# fixed resolver: shared/strings 8, shared/decimal 18,
+# dark-slide/table-cell-model 33, nothing failed or skipped. Eleven releases of
+# fixtures passed between the two pins; every intervening suite ran clean here.
+#
 # CI checks out `ref: v<this>` from .github/workflows/ci.yml. Move the two
 # together; test_ci_checks_out_the_fixture_tag_this_suite_pins fails otherwise.
-PINNED_SUITE_VERSION = "0.22.1"
+PINNED_SUITE_VERSION = "0.34.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk(

@@ -11,6 +11,46 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-07
+
+### Added
+
+- **The published schema now carries the ITEM shape of a table's ``columns`` and
+  ``rows``**, mirroring PHP ``Schema::tableColumnsJsonSchema()`` /
+  ``tableRowsJsonSchema()`` byte for byte. It exported ``{"type": "array"}`` and
+  nothing more, so a tool vocabulary generated from ``json_schema()`` could not
+  teach an author that a column's ``key`` is what every row is keyed BY. Reported as
+  fancy-slides#14.
+
+- **``validate()`` flags a table row that matches no column**, as PHP's does. A
+  positional row, a partially-filled row and a row carrying only style are not
+  flagged; the hint names the keys that would have worked.
+
+### Changed
+
+- **A table row given as a LIST is now read in COLUMN ORDER** rather than DROPPED
+  FROM THE DECK. ``rows: [["Starter", "$49"]]`` means
+  ``[{"plan": "Starter", "price": "$49"}]``. The grid loop tested
+  ``is_plain_object(row)`` and ``continue``d, so a list row vanished -- while the
+  PHP engine kept it and emitted a row of empty cells. Three engines held to
+  byte-identical OOXML disagreed on the ROW COUNT of the same deck, silently.
+
+  **Nothing a consumer did stops working**: a keyed row is unchanged, and a list row
+  produced no row at all before. Pinned cross-language by ``fancy-conformance``
+  0.34.0 rows 0029-0033.
+
+- ``table_resolver.STYLE_KEYS`` and ``ROW_KEYS`` are public, so the validator reads
+  the same list the resolver does rather than a second copy of it.
+
+- Pinned ``fancy-conformance`` fixtures move 0.22.1 -> 0.34.0.
+
+### Fixed
+
+- **The PHP schema-parity check compared a HAND LIST of seven element properties**,
+  so ``columns`` and ``rows`` sat outside it and went years undescribed in all three
+  engines with the check green. It now compares every element property, and asserts
+  the key sets match.
+
 ### Fixed
 
 - **Documentation: the reader docstring no longer implies this package diffs
