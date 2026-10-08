@@ -11,6 +11,39 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-07
+
+### Added
+
+- **`metadata.created` / `metadata.modified` now set `docProps/core.xml`'s
+  timestamps** (dark-slide#10). `modified` falls back to `created`, and `created`
+  to `EPOCH_TIMESTAMP`. Non-strings and the empty string are ignored rather than written,
+  because `0` in a W3CDTF field produces a document a reader can reject.
+
+### Changed
+
+- **`metadata.created` / `metadata.modified` are now asserted in their own suite**
+  (`test_writer_timestamp.py`), not only implicitly through the determinism and
+  reader-purity suites. **No behaviour changed in this engine** — it has honoured
+  both keys since its first release, and the default is still `EPOCH_TIMESTAMP`.
+
+  The release exists because the other two caught up: PHP 0.14.0 and Node 0.12.0
+  now read the same two keys with the same `modified`-falls-back-to-`created` rule
+  (dark-slide#10). A deck supplying both is byte-identical across all three for
+  the first time.
+
+### Fixed
+
+- **Two stale claims in `AGENTS.md` and one in a docstring.** Rule 6's ledger note
+  and `EPOCH_TIMESTAMP`'s comment both said PHP "offers no way to pin" the
+  core-props stamp. True when written; false as of PHP 0.14.0. **A divergence
+  ledger with a wrong entry is worse than no ledger**, because it is the one place
+  anyone checks before trusting the trio.
+
+  `KNOWN_DIVERGENT_PARTS` keeps its single entry: the DEFAULT still differs (the
+  other two fall back to their clock, this port to the sentinel), which is now
+  what the entry describes.
+
 ## [0.6.0] - 2026-10-07
 
 ### Changed

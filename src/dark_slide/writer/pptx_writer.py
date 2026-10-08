@@ -87,9 +87,8 @@ CHART_PALETTE = ["8B5CF6", "EC4899", "06B6D4", "F59E0B", "10B981", "3B82F6", "EF
 
 #: The document timestamp used when a deck carries none.
 #:
-#: PHP writes ``gmdate()`` here, which makes its output non-reproducible; this
-#: port has to be byte-stable (a golden fixture is impossible otherwise, and
-#: ``fancy-conformance`` treats determinism as a precondition for a writer
+#: This port has to be byte-stable (a golden fixture is impossible otherwise,
+#: and ``fancy-conformance`` treats determinism as a precondition for a writer
 #: suite). So the clock is an INPUT: ``metadata.created`` / ``metadata.modified``
 #: if the deck supplies them, this sentinel otherwise. It matches the fixed DOS
 #: date in the zip's local headers, so the two "we do not know when this was

@@ -150,11 +150,28 @@ asserts the default emits an `[image: …]` placeholder and makes no request.
 ### 6. Determinism is required, so the clock is an INPUT
 
 `test_determinism.py` asserts byte stability, and `fancy-conformance` treats a
-determinism flag as a precondition for a writer suite. PHP stamps
-`docProps/core.xml` with `gmdate()` at write time and offers no way to pin it,
-so this port reads `metadata.created` / `metadata.modified` when the deck
-supplies them and falls back to `EPOCH_TIMESTAMP` otherwise. That is the ONE
-entry in `KNOWN_DIVERGENT_PARTS`, and it names the reason.
+determinism flag as a precondition for a writer suite. So this port reads
+`metadata.created` / `metadata.modified` when the deck supplies them and falls
+back to `EPOCH_TIMESTAMP` otherwise. That is the ONE entry in
+`KNOWN_DIVERGENT_PARTS`, and it names the reason.
+
+**Corrected 2026-10-07 (dark-slide#10).** This entry used to say PHP "offers no
+way to pin it". That was true when written and is not now: PHP and Node read the
+SAME two keys as of dark-slide 0.14.0 / 0.12.0, with the same
+`modified`-falls-back-to-`created` rule, because `to_bytes()` embedding the clock
+unconditionally meant two calls a second apart produced different bytes and a
+content-addressed store saw a change that was not one.
+
+**What still diverges is only the DEFAULT**: PHP and Node fall back to their
+clock, this port to the sentinel. So `KNOWN_DIVERGENT_PARTS` stays, and so does
+the Node suite's mask — but they now cover a documented difference in a default
+rather than a field one engine could not control. A deck that supplies both keys
+is byte-identical across all three, which it never could be before, and
+`test_writer_timestamp.py` pins every part of that in each engine.
+
+Pinning the shared fixtures' timestamps would let the entry and the mask go
+entirely. Not done: it changes a fixture three parity suites compare on, and the
+masked field is now a known default rather than a blind spot.
 
 ### 7. The rel-id collision is reproduced, not fixed
 
