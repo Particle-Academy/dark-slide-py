@@ -36,6 +36,8 @@ class ChartSeries(TypedDict):
     smooth: bool
     area: bool
     points: list[dict[str, float]]
+    #: ECharts' ``label.show``: the series' values drawn on the chart.
+    labels: bool
 
 
 class ChartSpec(TypedDict):
@@ -43,6 +45,7 @@ class ChartSpec(TypedDict):
     title: str
     categories: list[str]
     series: list[ChartSeries]
+    legend: bool
 
 
 def translate(option: Any) -> ChartSpec | None:
@@ -92,7 +95,20 @@ def translate(option: Any) -> ChartSpec | None:
         "title": _extract_title(option),
         "categories": categories,
         "series": series,
+        "legend": _wants_legend(option),
     }
+
+
+def _wants_legend(option: dict[str, Any]) -> bool:
+    """A legend only when ``option.legend`` is set and not switched off, as ECharts draws it.
+
+    A dict OR a list, as PHP's ``is_array`` reads it; ``show: null`` counts as
+    shown, as PHP's ``?? true`` reads it.
+    """
+    legend = option.get("legend")
+    if isinstance(legend, list):
+        return True
+    return isinstance(legend, dict) and legend.get("show") is not False
 
 
 def _extract_series(option: dict[str, Any]) -> list[Any]:
@@ -177,6 +193,7 @@ def _normalise_series(raw: dict[str, Any], series_type: str) -> ChartSeries | No
         "smooth": _truthy(raw.get("smooth")),
         "area": series_type == "line" and raw.get("areaStyle") is not None,
         "points": points,
+        "labels": isinstance(raw.get("label"), dict) and raw["label"].get("show") is True,
     }
 
 

@@ -1447,7 +1447,9 @@ class PptxWriter:
         fill_hex, fill_alpha = Color.parse(
             _str_or(element.get("fill"), "rgba(139,92,246,0.15)"), "8B5CF6"
         )
-        stroke_hex, stroke_alpha = Color.parse(_str_or(element.get("stroke"), "#8B5CF6"), "8B5CF6")
+        # The theme accent, as fancy-slides draws it.
+        theme_accent = _get(_get(self._deck_theme, "colors"), "accent", "#8B5CF6")
+        stroke_hex, stroke_alpha = Color.parse(_str_or(element.get("stroke"), php_string(theme_accent)), "8B5CF6")
         # Design pixels, as fancy-slides draws it: the default 2px is 0.75pt.
         stroke_width = php_float(_get(element, "strokeWidth", 2))
         stroke_width_emu = Emu.from_pt(DesignUnits.to_pt(stroke_width, self._deck_theme))
@@ -1850,7 +1852,8 @@ class PptxWriter:
             + "<c:layout/>"
             + plot
             + "</c:plotArea>"
-            + '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>'
+            # Only when the option asks, as ECharts draws it.
+            + ('<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>' if spec["legend"] else "")
             + '<c:plotVisOnly val="1"/>'
             + '<c:dispBlanksAs val="gap"/>'
             + "</c:chart>"
@@ -1866,6 +1869,7 @@ class PptxWriter:
                 f'<c:order val="{idx}"/>'
                 + self._chart_series_name(series, idx)
                 + self._chart_series_fill(idx)
+                + self._chart_data_labels(series, "outEnd")
                 + self._chart_cat_ref(spec["categories"], series["values"])
                 + self._chart_val_ref(series["values"])
                 + "</c:ser>"
@@ -1894,6 +1898,7 @@ class PptxWriter:
                 f'<c:order val="{idx}"/>'
                 + self._chart_series_name(series, idx)
                 + self._chart_series_line(idx)
+                + self._chart_data_labels(series, None if is_area else "t")
                 + self._chart_cat_ref(spec["categories"], series["values"])
                 + self._chart_val_ref(series["values"])
                 + smooth
@@ -1944,6 +1949,7 @@ class PptxWriter:
             '<c:order val="0"/>'
             + self._chart_series_name(series, 0)
             + d_pts
+            + self._chart_data_labels(series, "bestFit")
             + self._chart_cat_ref(categories, values)
             + self._chart_val_ref(values)
             + "</c:ser>"
@@ -1988,6 +1994,10 @@ class PptxWriter:
             '<c:scaling><c:orientation val="minMax"/></c:scaling>'
             '<c:delete val="0"/>'
             '<c:axPos val="b"/>'
+            # Stated, never left to a reader's default (see the PHP engine).
+            '<c:majorTickMark val="out"/>'
+            '<c:minorTickMark val="none"/>'
+            '<c:tickLblPos val="nextTo"/>'
             '<c:crossAx val="222222222"/>'
             "</c:catAx>"
             "<c:valAx>"
@@ -1995,6 +2005,9 @@ class PptxWriter:
             '<c:scaling><c:orientation val="minMax"/></c:scaling>'
             '<c:delete val="0"/>'
             '<c:axPos val="l"/>'
+            '<c:majorTickMark val="none"/>'
+            '<c:minorTickMark val="none"/>'
+            '<c:tickLblPos val="nextTo"/>'
             '<c:crossAx val="111111111"/>'
             "</c:valAx>"
         )
@@ -2007,6 +2020,19 @@ class PptxWriter:
             f'<c:tx><c:strRef><c:f>Sheet1!$A${idx + 1}</c:f><c:strCache>'
             f'<c:ptCount val="1"/><c:pt idx="0"><c:v>{Xml.text(name)}</c:v></c:pt>'
             "</c:strCache></c:strRef></c:tx>"
+        )
+
+    def _chart_data_labels(self, series: Any, position: str | None) -> str:
+        """``<c:dLbls>`` showing each value when the series asks with ``label.show``; '' otherwise."""
+        if not series.get("labels"):
+            return ""
+        return (
+            "<c:dLbls>"
+            "<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>"
+            + (f'<c:dLblPos val="{position}"/>' if position is not None else "")
+            + '<c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/>'
+            '<c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/>'
+            "</c:dLbls>"
         )
 
     def _chart_series_fill(self, idx: int) -> str:
