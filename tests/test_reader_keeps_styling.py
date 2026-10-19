@@ -131,3 +131,23 @@ def test_reads_a_native_chart_back_as_the_echarts_option_that_writes_it() -> Non
             return z.read("ppt/charts/chart1.xml").decode("utf-8")
 
     assert chart_part(to_bytes(_read(deck))) == chart_part(to_bytes(deck))
+
+
+def test_reads_a_table_back_with_its_styling_as_the_cell_model_that_writes_it() -> None:
+    deck = _deck()
+    deck["slides"][0]["elements"] = [{
+        "id": "kpi", "type": "table", "x": 0.06, "y": 0.2, "w": 0.88, "h": 0.5,
+        "columns": [{"key": "k", "label": "KPI", "width": 0.5}, {"key": "s", "label": "Status", "width": 0.5}],
+        "rows": [
+            {"k": "On-time delivery", "s": {"text": "Below target", "fill": "#DC2626", "color": "#FFFFFF", "bold": True}},
+            {"k": "Damage rate", "s": {"text": "On target", "fill": "#16A34A", "color": "#FFFFFF", "bold": True}},
+        ],
+        "style": {"header": {"fill": "#38BDF8", "color": "#0B1220"}, "fontSize": 36},
+    }]
+    table = _read(deck)["slides"][0]["elements"][0]
+    assert {k: table["style"]["header"][k] for k in ("fill", "color", "bold")} == {"fill": "#38BDF8", "color": "#0B1220", "bold": True}
+    assert table["style"]["fontSize"] == 36
+    assert table["rows"][0]["col1"] == "On-time delivery"
+    assert {k: table["rows"][0]["col2"][k] for k in ("text", "fill", "color", "bold")} == {
+        "text": "Below target", "fill": "#DC2626", "color": "#FFFFFF", "bold": True}
+    assert _parts(to_bytes(_read(deck)))["ppt/slides/slide1.xml"] == _parts(to_bytes(deck))["ppt/slides/slide1.xml"]

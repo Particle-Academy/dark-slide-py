@@ -920,13 +920,61 @@ class PptxReader:
                 column["width"] = grid_widths[i] / grid_total
             columns.append(column)
 
-        body_rows: list[dict[str, str]] = []
-        for row in rows[0 if not has_header else 1 :]:
+        # Styling, read as the cell model that writes it. Mirrors PHP
+        # PptxReader::parseGraphicFrame step for step.
+        body = rows[0 if not has_header else 1 :]
+        body_styles = []
+        odd_fills = []
+        for n, row in enumerate(body):
+            for tc in _descendants(row, "tc"):
+                look = self._cell_style(tc)
+                body_styles.append(look)
+                if n % 2 == 1:
+                    odd_fills.append(look["fill"])
+        table_color = _modal([s["color"] for s in body_styles])
+        table_size = _modal([s["fontSize"] for s in body_styles])
+        stripe_fill = _modal(odd_fills)
+        style: dict[str, Any] = {"stripe": False if stripe_fill is None else {"fill": stripe_fill}}
+        if table_color is not None:
+            style["color"] = table_color
+        if table_size is not None:
+            style["fontSize"] = table_size
+        if has_header and first_cells:
+            head = self._cell_style(first_cells[0])
+            header: dict[str, Any] = {"fill": head["fill"] if head["fill"] is not None else "none", "bold": head["bold"]}
+            if head["color"] is not None:
+                header["color"] = head["color"]
+            if head["fontSize"] is not None and head["fontSize"] != table_size:
+                header["fontSize"] = head["fontSize"]
+            style["header"] = header
+        else:
+            style["header"] = False
+
+        body_rows: list[dict[str, Any]] = []
+        for n, row in enumerate(body):
             row_cells = _descendants(row, "tc")
-            row_data: dict[str, str] = {}
+            band = stripe_fill if n % 2 == 1 else None
+            row_data: dict[str, Any] = {}
             for i, col in enumerate(columns):
-                if i < len(row_cells):
-                    row_data[col["key"]] = self._cell_text(row_cells[i])
+                if i >= len(row_cells):
+                    continue
+                s = self._cell_style(row_cells[i])
+                own: dict[str, Any] = {}
+                if s["fill"] != band:
+                    own["fill"] = s["fill"] if s["fill"] is not None else "none"
+                if s["color"] is not None and s["color"] != table_color:
+                    own["color"] = s["color"]
+                if s["bold"]:
+                    own["bold"] = True
+                if s["italic"]:
+                    own["italic"] = True
+                if s["fontSize"] is not None and s["fontSize"] != table_size:
+                    own["fontSize"] = s["fontSize"]
+                if s["align"] is not None:
+                    own["align"] = s["align"]
+                if s["fontFamily"] is not None:
+                    own["fontFamily"] = s["fontFamily"]
+                row_data[col["key"]] = s["text"] if not own else {"text": s["text"], **own}
             body_rows.append(row_data)
 
         c_nv_pr = _descendant(gf, "cNvPr")
@@ -941,6 +989,50 @@ class PptxReader:
             "h": self._frac_y(_to_int(_at(extent, "cy"))),
             "columns": columns,
             "rows": body_rows,
+            "style": style,
+        }
+
+    def _cell_style(self, tc: _Node) -> dict[str, Any]:
+        # One table cell's text and look. Mirrors PHP PptxReader::cellStyle.
+        tc_pr = _el(tc, "tcPr")
+        fill_solid = _el(tc_pr, "solidFill")
+        fill = _solid_fill_color(fill_solid) if fill_solid is not None else None
+        r_pr = None
+        for r in _descendants(tc, "r"):
+            r_pr = _el(r, "rPr")
+            if r_pr is not None:
+                break
+        if r_pr is None:
+            r_pr = _descendant(tc, "endParaRPr")
+        color = None
+        font_size: int | float | None = None
+        font_family = None
+        bold = False
+        italic = False
+        if r_pr is not None:
+            solid = _el(r_pr, "solidFill")
+            color = _solid_fill_color(solid) if solid is not None else None
+            bold = (_at(r_pr, "b") or "0") == "1"
+            italic = (_at(r_pr, "i") or "0") == "1"
+            sz = _at(r_pr, "sz") or ""
+            font_size = _px_from_hundredths(int(sz)) if _DIGITS.match(sz) else None
+            face = _at(_el(r_pr, "latin"), "typeface") or ""
+            font_family = face if face != "" else None
+        p_pr = None
+        for p in _descendants(tc, "p"):
+            p_pr = _el(p, "pPr")
+            if p_pr is not None:
+                break
+        algn = _at(p_pr, "algn") or ""
+        return {
+            "text": self._cell_text(tc),
+            "fill": fill,
+            "color": color,
+            "bold": bold,
+            "italic": italic,
+            "fontSize": font_size,
+            "align": {"ctr": "center", "r": "right", "just": "justify"}.get(algn),
+            "fontFamily": font_family,
         }
 
     def _parse_chart_frame(self, gf: _Node, offset: _Node, extent: _Node) -> dict[str, Any] | None:
@@ -1181,6 +1273,22 @@ class PptxReader:
 
 _DIGITS = re.compile(r"^[0-9]+$")
 _HEX6 = re.compile(r"^[0-9A-F]{6}$")
+
+
+def _modal(values: list[Any]) -> Any:
+    # The most common non-null value; a tie goes to the one seen first. Mirrors PHP modal.
+    best = None
+    best_count = 0
+    seen: dict[str, int] = {}
+    for v in values:
+        if v is None:
+            continue
+        key = ("s:" + v) if isinstance(v, str) else ("n:" + _num_to_str(float(v)))
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] > best_count:
+            best = v
+            best_count = seen[key]
+    return best
 
 
 def _chart_points(ser: _Node, host: str) -> list[str]:
