@@ -11,6 +11,19 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-18
+
+### Fixed
+
+- **Text with no `style.color` now takes `theme.colors.text`**, as fancy-slides
+  draws it. It used a fixed `#0F172A`, so on any dark theme every unstyled text
+  box was near-black on a dark background: the deck previewed correctly and
+  exported with no visible text. An explicit `style.color` still wins, and a
+  theme with no `text` colour keeps `#0F172A`. **Nothing to do** unless you
+  relied on unstyled text ignoring your theme; to keep that look, set
+  `style.color: "#0F172A"`. Same fix as `particle-academy/dark-slide` 0.14.1 and
+  `@particle-academy/dark-slide` 0.12.1; parity holds.
+
 ## [0.7.0] - 2026-10-07
 
 ### Added

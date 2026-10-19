@@ -2120,7 +2120,10 @@ class PptxWriter:
         base_italic = ' i="1"' if php_truthy(style.get("italic")) else ""
         base_underline = ' u="sng"' if php_truthy(style.get("underline")) else ""
         align = self._align_to_algn(_get(style, "align", "left"))
-        color_hex = Color.parse(php_string(_get(style, "color", "#0F172A")), "0F172A")[0]
+        # Unstyled text takes the theme's text colour, as fancy-slides draws it.
+        # A fixed #0F172A here made every unstyled box invisible on a dark theme.
+        theme_text = _get(_get(self._deck_theme, "colors"), "text", "#0F172A")
+        color_hex = Color.parse(php_string(_get(style, "color", theme_text)), "0F172A")[0]
         font_family_value = style.get("fontFamily")
         font_family = (
             f'<a:latin typeface="{Xml.attr(php_string(font_family_value))}"/>'
