@@ -22,6 +22,7 @@ from .schema.schema import Schema
 from .schema.validator import Validator
 from .util import php_string
 from .writer.pptx_writer import PptxWriter
+from .lint import lint_deck
 
 __all__ = [
     "VERSION",
@@ -32,6 +33,7 @@ __all__ = [
     "read",
     "from_bytes",
     "describe",
+    "lint",
     "json_schema",
     "version",
 ]
@@ -151,6 +153,15 @@ def read(data: bytes | bytearray | str | os.PathLike[str]) -> dict[str, Any]:
 def from_bytes(data: bytes | bytearray) -> dict[str, Any]:
     """Alias for :func:`read` restricted to bytes. Mirrors the Node port."""
     return PptxReader().from_bytes(bytes(data))
+
+
+def lint(deck: Any) -> list[dict[str, Any]]:
+    """Layout problems that will show on the slides, read-only. Mirrors PHP ``Agent::lint``.
+
+    Hand the findings back to the agent that built the deck and let it write
+    again; see ``lint.py`` for the metrics.
+    """
+    return lint_deck(deck)
 
 
 def describe(deck: Any) -> str:

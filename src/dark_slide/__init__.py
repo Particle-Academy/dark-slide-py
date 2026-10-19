@@ -36,6 +36,7 @@ from .agent import (
     VERSION,
     describe,
     from_bytes,
+    lint,
     json_schema,
     read,
     to_bytes,
@@ -68,6 +69,7 @@ __all__ = [
     "read",
     "from_bytes",
     "describe",
+    "lint",
     "json_schema",
     "version",
     # Errors.
