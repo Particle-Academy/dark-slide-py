@@ -409,6 +409,7 @@ class PptxReader:
         }
 
         self._mono_typeface = self._read_mono_typeface()
+        deck["theme"].update(self._read_theme())
         self._read_slide_size()
         # 16:9 at 10in is the default and says nothing; any other shape is part
         # of the deck and comes back as its aspect ratio.
@@ -705,22 +706,32 @@ class PptxReader:
         t_body = _descendant(sp, "txBody")
         paragraph_markdown: list[str] = []
         any_decoration = False
-        if t_body is not None:
-            for p in _descendants(t_body, "p"):
-                md, decorated = self._paragraph_to_markdown(p)
-                paragraph_markdown.append(md)
-                any_decoration = any_decoration or decorated
+        paragraphs = [self._paragraph_runs(p) for p in _descendants(t_body, "p")] if t_body is not None else []
+        # Bold / italic shared by EVERY text run of the element are its style,
+        # so they carry no markers; decided over the element, as PHP does.
+        all_runs = [run for _, runs in paragraphs for run in runs]
+        text_runs = [run for run in all_runs if run["text"] != ""]
+        all_bold = bool(text_runs) and all(run["b"] for run in text_runs)
+        all_italic = bool(text_runs) and all(run["i"] for run in text_runs)
+        for is_bullet, runs in paragraphs:
+            md, decorated = self._runs_to_markdown(is_bullet, runs, all_bold, all_italic)
+            paragraph_markdown.append(md)
+            any_decoration = any_decoration or decorated
 
         prst_geom = _descendant(sp, "prstGeom")
         prst = _at(prst_geom, "prst") if prst_geom is not None else None
 
         if any(text != "" for text in paragraph_markdown):
-            return {
+            element: dict[str, Any] = {
                 **base,
                 "type": "text",
                 "content": "\n".join(paragraph_markdown),
                 "format": "markdown" if any_decoration else "plain",
             }
+            style = self._text_style(t_body, all_runs) if t_body is not None else {}
+            if style:
+                element["style"] = style
+            return element
 
         shape_kind = {
             "rect": "rect",
@@ -731,9 +742,103 @@ class PptxReader:
             "rightArrow": "arrow",
         }.get(prst or "")
         if shape_kind is not None:
-            return {**base, "type": "shape", "shape": shape_kind}
+            return {**base, "type": "shape", "shape": shape_kind, **self._shape_paint(sp)}
 
         return None
+
+    def _read_theme(self) -> dict[str, Any]:
+        """The theme's colours and fonts, in the deck's own keys. Mirrors PHP
+        ``PptxReader::readTheme``: background = lt1, text = dk1, accent =
+        accent1, muted = dk2, surface = lt2; heading = major font, body = minor
+        font; mono only when NAMED (the writer's Consolas default is not
+        reported, so a read stays a fixed point of write-then-read)."""
+        xml = self._get_part("ppt/theme/theme1.xml")
+        root = _parse_xml(xml) if xml is not None else None
+        if root is None:
+            return {}
+
+        clr_scheme = _descendant(root, "clrScheme")
+        colors: dict[str, str] = {}
+        for key, slot in (("background", "lt1"), ("text", "dk1"), ("accent", "accent1"), ("muted", "dk2"), ("surface", "lt2")):
+            node = _el(clr_scheme, slot)
+            hex_value = _scheme_hex(node) if node is not None else None
+            if hex_value is not None:
+                colors[key] = "#" + hex_value
+
+        font_scheme = _descendant(root, "fontScheme")
+        fonts: dict[str, str] = {}
+        for key, slot in (("heading", "majorFont"), ("body", "minorFont")):
+            face = _at(_el(_el(font_scheme, slot), "latin"), "typeface") or ""
+            if face != "":
+                fonts[key] = face
+        if self._mono_typeface != "" and self._mono_typeface != "Consolas":
+            fonts["mono"] = self._mono_typeface
+
+        out: dict[str, Any] = {}
+        if colors:
+            out["colors"] = colors
+        if fonts:
+            out["fonts"] = fonts
+        return out
+
+    def _shape_paint(self, sp: _Node) -> dict[str, Any]:
+        """A shape's fill and outline. Mirrors PHP ``PptxReader::shapePaint``:
+        ``noFill`` is stated as ``transparent``, because an absent ``fill``
+        writes the default tint and an absent ``stroke`` the theme accent."""
+        sp_pr = _el(sp, "spPr")
+        if sp_pr is None:
+            return {}
+        out: dict[str, Any] = {}
+        solid = _el(sp_pr, "solidFill")
+        if _el(sp_pr, "noFill") is not None:
+            out["fill"] = "transparent"
+        elif solid is not None:
+            color = _solid_fill_color(solid)
+            if color is not None:
+                out["fill"] = color
+
+        ln = _el(sp_pr, "ln")
+        if ln is not None:
+            ln_solid = _el(ln, "solidFill")
+            ln_color = _solid_fill_color(ln_solid) if ln_solid is not None else None
+            if _el(ln, "noFill") is not None:
+                out["stroke"] = "transparent"
+            elif ln_color is not None:
+                out["stroke"] = ln_color
+                w = _at(ln, "w") or ""
+                if _DIGITS.match(w):
+                    out["strokeWidth"] = _px_from_emu(int(w))
+                if _el(ln, "prstDash") is not None:
+                    out["dashed"] = True
+        return out
+
+    def _text_style(self, t_body: _Node, runs: list[dict[str, Any]]) -> dict[str, Any]:
+        """A text body's element-level style. Mirrors PHP ``PptxReader::textStyle``."""
+        style: dict[str, Any] = {}
+        first = next((run for run in runs if run["text"] != "" and not run["code"]), None)
+        if first is not None and first["sz"] is not None:
+            style["fontSize"] = _px_from_hundredths(first["sz"])
+        text = [run for run in runs if run["text"] != ""]
+        if text and all(run["b"] for run in text):
+            style["weight"] = 700
+        if text and all(run["i"] for run in text):
+            style["italic"] = True
+        if text and all(run["u"] for run in text):
+            style["underline"] = True
+        if first is not None and first["color"] is not None:
+            style["color"] = first["color"]
+        if first is not None and first["font"] is not None:
+            style["fontFamily"] = first["font"]
+
+        algn = _at(_el(_el(t_body, "p"), "pPr"), "algn") or ""
+        align = {"ctr": "center", "r": "right", "just": "justify"}.get(algn)
+        if align is not None:
+            style["align"] = align
+        anchor = _at(_el(t_body, "bodyPr"), "anchor") or ""
+        vertical = {"ctr": "middle", "b": "bottom"}.get(anchor)
+        if vertical is not None:
+            style["verticalAlign"] = vertical
+        return style
 
     def _parse_pic(self, pic: _Node) -> dict[str, Any] | None:
         xfrm = _descendant(pic, "xfrm")
@@ -840,43 +945,35 @@ class PptxReader:
     def _cell_text(self, cell: _Node) -> str:
         return "".join(_deep_text(t) for t in _descendants(cell, "t"))
 
-    def _paragraph_to_markdown(self, p: _Node) -> tuple[str, bool]:
-        """One ``<a:p>`` back to a line of markdown, plus "was it decorated".
-
-        The heuristic that matters: when EVERY non-empty run is bold, bold is
-        treated as the paragraph default (it came from ``style.weight``) and no
-        ``**`` is emitted. Mixed runs get markers. Without this, a heading
-        styled bold would come back as ``**Heading**`` and re-render doubly
-        bold on the next write.
-
-        ATX headings are deliberately NOT reconstructed from run sizes — a
-        hand-styled large bold line and a ``#`` heading are indistinguishable
-        in the file, so round-trip fidelity stops at inline spans.
-        """
+    def _paragraph_runs(self, p: _Node) -> tuple[bool, list[dict[str, Any]]]:
+        """A paragraph's bullet flag and runs. Mirrors PHP ``paragraphRuns``."""
         p_pr = _descendant(p, "pPr")
         is_bullet = p_pr is not None and _descendant(p_pr, "buChar") is not None
 
-        runs = _descendants(p, "r")
-        if not runs:
-            return ("- " if is_bullet else "", is_bullet)
-
         parsed: list[dict[str, Any]] = []
-        all_bold = True
-        all_italic = True
-        any_non_empty = False
-        for r in runs:
+        for r in _descendants(p, "r"):
             r_pr = _el(r, "rPr")
             t_node = _el(r, "t")
             text = _deep_text(t_node) if t_node is not None else ""
             bold = False
             italic = False
+            underline = False
             code = False
+            size: int | None = None
+            color: str | None = None
+            font: str | None = None
             if r_pr is not None:
                 bold = (_at(r_pr, "b") or "0") == "1"
                 italic = (_at(r_pr, "i") or "0") == "1"
+                underline = (_at(r_pr, "u") or "none") != "none"
+                sz = _at(r_pr, "sz") or ""
+                size = int(sz) if _DIGITS.match(sz) else None
+                solid = _el(r_pr, "solidFill")
+                color = _solid_fill_color(solid) if solid is not None else None
                 latin = _el(r_pr, "latin")
                 if latin is not None:
-                    typeface = (_at(latin, "typeface") or "").lower()
+                    face = _at(latin, "typeface") or ""
+                    typeface = face.lower()
                     # Exact match against the typeface the deck RECORDED
                     # first, then the name sniff.
                     #
@@ -897,15 +994,29 @@ class PptxReader:
                         or "courier" in typeface
                     ):
                         code = True
-            if text != "":
-                any_non_empty = True
-                if not bold:
-                    all_bold = False
-                if not italic:
-                    all_italic = False
-            parsed.append({"text": text, "b": bold, "i": italic, "code": code})
+                    elif face != "":
+                        font = face
+            parsed.append({
+                "text": text, "b": bold, "i": italic, "u": underline, "code": code,
+                "sz": size, "color": color, "font": font,
+            })
 
-        if not any_non_empty:
+        return (is_bullet, parsed)
+
+    def _runs_to_markdown(
+        self, is_bullet: bool, parsed: list[dict[str, Any]], all_bold: bool, all_italic: bool
+    ) -> tuple[str, bool]:
+        """One paragraph's runs back to a line of markdown, plus "was it decorated".
+
+        Bold / italic shared by every text run of the ELEMENT are its style and
+        carry no markers; otherwise the bold runs get ``**``. Mirrors PHP
+        ``runsToMarkdown``.
+
+        ATX headings are deliberately NOT reconstructed from run sizes — a
+        hand-styled large bold line and a ``#`` heading are indistinguishable
+        in the file, so round-trip fidelity stops at inline spans.
+        """
+        if not any(run["text"] != "" for run in parsed):
             return ("- " if is_bullet else "", is_bullet)
 
         # Coalesce adjacent runs that carry the SAME decoration.
@@ -961,6 +1072,62 @@ class PptxReader:
             return ("- " + line, True)
 
         return (line, any_decoration)
+
+
+_DIGITS = re.compile(r"^[0-9]+$")
+_HEX6 = re.compile(r"^[0-9A-F]{6}$")
+
+
+def _whole_or_float(value: float) -> int | float:
+    """An int when whole, as PHP's reader returns 88 rather than 88.0."""
+    return int(value) if value == math.floor(value) else value
+
+
+def _px_from_hundredths(hundredths: int) -> int | float:
+    """Design pixels on the 1920 canvas from hundredths of a point, to 2 decimals."""
+    return _whole_or_float(Emu.php_round(hundredths * 2 / 75 * 100) / 100)
+
+
+def _px_from_emu(emu: int) -> int | float:
+    """Design pixels from EMU (12700 per point), to 2 decimals."""
+    return _whole_or_float(Emu.php_round(emu * 8 / 38100 * 100) / 100)
+
+
+def _scheme_hex(slot: _Node) -> str | None:
+    """A colour slot's sRGB value (or a system colour's last-known one), upper-case, or None."""
+    srgb = _el(slot, "srgbClr")
+    sys_clr = _el(slot, "sysClr")
+    if srgb is not None:
+        val = _at(srgb, "val") or ""
+    elif sys_clr is not None:
+        val = _at(sys_clr, "lastClr") or ""
+    else:
+        val = ""
+    val = val.upper()
+    return val if _HEX6.match(val) else None
+
+
+def _solid_fill_color(solid_fill: _Node) -> str | None:
+    """A ``<a:solidFill>`` as the deck writes colours: ``#RRGGBB``, or
+    ``rgba(r,g,b,a)`` below opaque. The alpha is formatted from the integer,
+    never a float, so the three engines print the same digits."""
+    clr = _el(solid_fill, "srgbClr")
+    if clr is None:
+        return None
+    hex_value = (_at(clr, "val") or "").upper()
+    if not _HEX6.match(hex_value):
+        return None
+    alpha_attr = _at(_el(clr, "alpha"), "val") or ""
+    alpha = int(alpha_attr) if _DIGITS.match(alpha_attr) else 100000
+    if alpha >= 100000:
+        return "#" + hex_value
+    fraction = str(alpha).rjust(5, "0").rstrip("0")
+    return "rgba({},{},{},{})".format(
+        int(hex_value[0:2], 16),
+        int(hex_value[2:4], 16),
+        int(hex_value[4:6], 16),
+        "0" if fraction == "" else "0." + fraction,
+    )
 
 
 def _num_to_str(value: float) -> str:

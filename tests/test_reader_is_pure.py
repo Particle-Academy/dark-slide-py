@@ -202,9 +202,10 @@ def test_a_renamed_deck_gets_a_different_id_because_a_title_is_content() -> None
 def test_two_byte_layouts_of_one_structure_get_the_same_id() -> None:
     """THE property. Everything else in this file is a corollary of it.
 
-    A shape element is the cheap way to induce it: our own writer does not
-    re-serialise a read-back shape to the same ``ppt/slides/slide1.xml`` bytes,
-    so these two packages genuinely differ on disk while reading to one deck. The
+    A rounded rectangle's corner radius is the cheap way to induce it: the
+    reader does not model the radius, so writing what it read emits the default
+    corner and these two packages genuinely differ on disk while reading to one
+    deck. (This used to be a shape's fill, until the reader learned fills.) The
     byte-difference is asserted first, because a test where the two buffers
     happened to be identical would pass while proving nothing.
     """
@@ -213,7 +214,7 @@ def test_two_byte_layouts_of_one_structure_get_the_same_id() -> None:
         "title": "Two Layouts",
         "theme": {"name": "default"},
         "slides": [{"id": "s1", "layout": "blank", "elements": [
-            {"id": "r1", "type": "shape", "shape": "rect", "x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3, "fill": "#FF0000"},
+            {"id": "r1", "type": "shape", "shape": "rounded-rect", "x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3, "fill": "#FF0000", "radius": 24},
         ]}],
     }
 
