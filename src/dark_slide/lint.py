@@ -172,8 +172,30 @@ def _text_height(el: dict[str, Any], style: dict[str, Any], font: float, box_w: 
     lines = 0
     for line in content.split("\n"):
         plain = _HEADING.sub("", _BULLET.sub("", _MARKS.sub("", line), count=1), count=1)
-        lines += max(1, math.ceil((len(plain) * glyph) / usable))
+        lines += _wrapped_lines(plain, max(1, math.floor(usable / glyph)))
     return lines * _LINE * font + 2 * pad_y
+
+
+_WORD_GAP = re.compile(r"[ \t]+")
+
+
+def _wrapped_lines(text: str, per_line: int) -> int:
+    """Lines one paragraph takes, wrapped greedily by WORD. Mirrors PHP Lint::wrappedLines."""
+    lines = 1
+    used = 0
+    for word in _WORD_GAP.split(text):
+        n = len(word)
+        if n == 0:
+            continue
+        if used > 0 and used + 1 + n <= per_line:
+            used += 1 + n
+            continue
+        if used > 0:
+            lines += 1
+        extra = (n - 1) // per_line
+        lines += extra
+        used = n - extra * per_line
+    return lines
 
 
 def _padding(style: dict[str, Any], canvas_w: float) -> tuple[float, float]:

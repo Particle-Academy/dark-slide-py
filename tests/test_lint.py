@@ -101,3 +101,14 @@ def test_markdown_markers_in_a_box_that_is_not_markdown_print_as_typed() -> None
         {"code": "literal-markdown", "slide": 1, "element": "lead", "message": message},
         {"code": "literal-markdown", "slide": 1, "element": "head", "message": message},
     ]
+
+
+def test_wraps_by_word_as_a_renderer_does() -> None:
+    findings = lint(_deck([
+        {"id": "title", "type": "text", "x": 0.06, "y": 0.27, "w": 0.54, "h": 0.5,
+         "content": "Q3 Business Review", "style": {"fontSize": 150, "weight": 700}},
+        {"id": "sub", "type": "text", "x": 0.06, "y": 0.79, "w": 0.54, "h": 0.12,
+         "content": "Regional revenue results", "style": {"fontSize": 44}},
+    ]))
+    assert [f["code"] for f in findings] == ["text-overflow", "overlap", "overlap"]
+    assert findings[0]["message"].startswith("At 150px this text needs about 0.54 of the slide height and its box is 0.5:")
