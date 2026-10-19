@@ -11,6 +11,8 @@ list, so an agent gets something it can act on rather than a stack trace.
 
 from __future__ import annotations
 
+from importlib import resources
+
 import os
 from typing import Any
 
@@ -207,3 +209,11 @@ def json_schema() -> dict[str, Any]:
 
 def version() -> str:
     return VERSION
+
+
+def guide() -> str:
+    """The agent guide: what makes this kind of file professional, and the schema
+    idioms that produce it. Give it to a model with the schema; it works with any
+    agent loop. Byte-identical to the PHP package's agent-guide/professional-decks.md
+    (tests/test_agent_guide.py pins the hash)."""
+    return resources.files(__package__).joinpath("agent_guide.md").read_text("utf-8")

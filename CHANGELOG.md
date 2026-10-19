@@ -11,6 +11,18 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-19
+
+### Added
+
+- **An agent guide ships with the package: `agent-guide/professional-decks.md`, and
+  `dark_slide.guide()` returns it.** What makes a deck professional and the schema
+  idioms that produce it, distilled from rubric-judged agent builds in the
+  Fancy document lab: every rule in it moved a measured score. Give it to a
+  model together with the JSON schema; it works with any agent loop. The same
+  bytes ship in the PHP, Node and Python packages (a test in each pins the
+  hash). **Nothing to do**; nothing else changed.
+
 ## [0.11.1] - 2026-10-19
 
 ### Fixed

@@ -42,6 +42,7 @@ from .agent import (
     to_bytes,
     validate,
     validate_and_repair,
+    guide,
     version,
     write,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "describe",
     "lint",
     "json_schema",
+    "guide",
     "version",
     # Errors.
     "SchemaException",
