@@ -67,6 +67,7 @@ from html import unescape
 from typing import Any
 
 from ..helpers import emu as Emu
+from ..util import php_float
 
 __all__ = ["PptxReader"]
 
@@ -883,9 +884,9 @@ class PptxReader:
 
         tbl = _descendant(gf, "tbl")
         if tbl is None:
-            # A chart frame, a diagram, an OLE object — recognised as
-            # something, modelled as nothing. Skipping beats guessing.
-            return None
+            # A chart is read back as its ECharts option; a diagram or an OLE
+            # object is recognised as something, modelled as nothing.
+            return self._parse_chart_frame(gf, offset, extent)
 
         rows = _descendants(tbl, "tr")
         if not rows:
@@ -940,6 +941,110 @@ class PptxReader:
             "h": self._frac_y(_to_int(_at(extent, "cy"))),
             "columns": columns,
             "rows": body_rows,
+        }
+
+    def _parse_chart_frame(self, gf: _Node, offset: _Node, extent: _Node) -> dict[str, Any] | None:
+        # A native chart, back as the ECharts option that writes it. Mirrors PHP
+        # PptxReader::parseChartFrame step for step.
+        ref = _descendant(gf, "chart")
+        rid = (_at(ref, "id") or "") if ref is not None else ""
+        target = self._current_slide_rels.get(rid, {}).get("target")
+        xml = self._get_part(target) if target is not None else None
+        root = _parse_xml(xml) if xml is not None else None
+        if root is None:
+            return None
+
+        chart_el = root if root.name == "chart" else _descendant(root, "chart")
+        plot_area = _descendant(root, "plotArea")
+        plot = None
+        tag = ""
+        for candidate in ("barChart", "lineChart", "areaChart", "pieChart", "scatterChart"):
+            plot = _el(plot_area, candidate)
+            if plot is not None:
+                tag = candidate
+                break
+        if plot is None:
+            return None
+        chart_type = {"barChart": "bar", "pieChart": "pie", "scatterChart": "scatter"}.get(tag, "line")
+
+        categories: list[str] = []
+        series: list[dict[str, Any]] = []
+        for ser in [c for c in plot.children if c.name == "ser"]:
+            if not categories and chart_type != "scatter":
+                categories = _chart_points(ser, "cat")
+            one: dict[str, Any] = {"type": chart_type}
+            name = _descendant(_el(ser, "tx"), "v")
+            if name is not None:
+                one["name"] = _deep_text(name)
+            if tag == "lineChart":
+                color_node = _el(_el(_el(_el(ser, "spPr"), "ln"), "solidFill"), "srgbClr")
+            elif tag in ("pieChart", "scatterChart"):
+                color_node = None
+            else:
+                color_node = _el(_el(_el(ser, "spPr"), "solidFill"), "srgbClr")
+            color_val = (_at(color_node, "val") or "").upper()
+            if color_node is not None and _HEX6.match(color_val):
+                one["itemStyle"] = {"color": "#" + color_val}
+            if tag == "areaChart":
+                one["areaStyle"] = {}
+            if _at(_el(ser, "smooth"), "val") == "1":
+                one["smooth"] = True
+            if _at(_el(_el(ser, "dLbls"), "showVal"), "val") == "1":
+                one["label"] = {"show": True}
+
+            if chart_type == "scatter":
+                xs = _chart_points(ser, "xVal")
+                ys = _chart_points(ser, "yVal")
+                data: list[Any] = [[php_float(x), php_float(ys[i] if i < len(ys) else "0")] for i, x in enumerate(xs)]
+            else:
+                point_colors: dict[int, str] = {}
+                for d_pt in [c for c in ser.children if c.name == "dPt"]:
+                    idx = _at(_el(d_pt, "idx"), "val") or ""
+                    clr = (_at(_descendant(d_pt, "srgbClr"), "val") or "").upper()
+                    if _DIGITS.match(idx) and _HEX6.match(clr):
+                        point_colors[int(idx)] = "#" + clr
+                data = []
+                for i, v in enumerate(_chart_points(ser, "val")):
+                    value = php_float(v)
+                    own = point_colors.get(i)
+                    if chart_type == "pie":
+                        point: dict[str, Any] = {"name": categories[i] if i < len(categories) else "", "value": value}
+                        if own is not None:
+                            point["itemStyle"] = {"color": own}
+                        data.append(point)
+                    elif own is not None:
+                        data.append({"value": value, "itemStyle": {"color": own}})
+                    else:
+                        data.append(value)
+            one["data"] = data
+            series.append(one)
+        if not series:
+            return None
+
+        option: dict[str, Any] = {}
+        title_el = _el(chart_el, "title")
+        title = "".join(_deep_text(t) for t in _descendants(title_el, "t")) if title_el is not None else ""
+        if title != "":
+            option["title"] = {"text": title}
+        if _el(chart_el, "legend") is not None:
+            option["legend"] = {}
+        if chart_type == "scatter":
+            option["xAxis"] = {"type": "value"}
+            option["yAxis"] = {"type": "value"}
+        elif chart_type != "pie":
+            option["xAxis"] = {"type": "category", "data": categories}
+            option["yAxis"] = {"type": "value"}
+        option["series"] = series
+
+        c_nv_pr = _descendant(gf, "cNvPr")
+        return {
+            "id": (_at(c_nv_pr, "name") if c_nv_pr is not None else None) or self._next_fallback_id("imported-chart-"),
+            "type": "chart",
+            "x": self._frac_x(_to_int(_at(offset, "x"))),
+            "y": self._frac_y(_to_int(_at(offset, "y"))),
+            "w": self._frac_x(_to_int(_at(extent, "cx"))),
+            "h": self._frac_y(_to_int(_at(extent, "cy"))),
+            "option": option,
         }
 
     def _cell_text(self, cell: _Node) -> str:
@@ -1076,6 +1181,26 @@ class PptxReader:
 
 _DIGITS = re.compile(r"^[0-9]+$")
 _HEX6 = re.compile(r"^[0-9A-F]{6}$")
+
+
+def _chart_points(ser: _Node, host: str) -> list[str]:
+    # A series' cached points under its host child (cat, val, xVal, yVal), in
+    # index order; an index with no point is "". Mirrors PHP chartPoints.
+    h = _el(ser, host)
+    try:
+        count = int(_at(_descendant(h, "ptCount"), "val") or "0")
+    except ValueError:
+        count = 0
+    out = [""] * max(0, count)
+    for pt in _descendants(h, "pt"):
+        try:
+            idx = int(_at(pt, "idx") or "0")
+        except ValueError:
+            idx = 0
+        if 0 <= idx < count:
+            v = _el(pt, "v")
+            out[idx] = _deep_text(v) if v is not None else ""
+    return out
 
 
 def _whole_or_float(value: float) -> int | float:

@@ -199,8 +199,9 @@ def test_unicode_content_survives_the_round_trip() -> None:
 # ── Degrading rather than throwing ────────────────────────────────────────
 
 
-def test_an_unmodellable_construct_is_skipped_not_raised() -> None:
-    """A chart frame is recognised as something and modelled as nothing.
+def test_a_chart_frame_reads_back_and_never_raises() -> None:
+    """A chart frame reads back as its ECharts option (0.13; it used to be
+    recognised and modelled as nothing).
 
     The whole import must not fail over one element the reader has no shape
     for — a deck out of PowerPoint always contains several.
@@ -220,7 +221,10 @@ def test_an_unmodellable_construct_is_skipped_not_raised() -> None:
         }
     )
     out = read_back(deck)
-    assert out["slides"][0]["elements"] == []
+    [chart] = out["slides"][0]["elements"]
+    assert chart["type"] == "chart"
+    assert chart["option"]["xAxis"]["data"] == ["a", "b"]
+    assert [s["data"] for s in chart["option"]["series"]] == [[1.0, 2.0]]
     assert len(out["slides"]) == 1  # the slide itself still came through
 
 

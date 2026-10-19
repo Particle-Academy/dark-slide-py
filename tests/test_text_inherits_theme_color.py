@@ -48,3 +48,25 @@ def test_an_element_colour_still_wins() -> None:
 
 def test_the_old_default_holds_without_a_theme_text_colour() -> None:
     assert '<a:srgbClr val="0F172A"/>' in _slide_xml({})
+
+
+def test_table_text_and_stripes_follow_a_dark_theme() -> None:
+    import io as _io
+    import zipfile as _zipfile
+
+    from dark_slide import to_bytes as _to_bytes
+
+    deck = {
+        "id": "t", "title": "T",
+        "theme": {"name": "dark", "colors": {"background": "#0B1220", "text": "#F9FAFB", "accent": "#38BDF8"}},
+        "slides": [{"id": "s1", "elements": [{
+            "id": "tb", "type": "table", "x": 0.1, "y": 0.2, "w": 0.8, "h": 0.5,
+            "columns": [{"key": "k", "label": "KPI"}, {"key": "v", "label": "Actual"}],
+            "rows": [{"k": "On-time", "v": "94.2%"}, {"k": "Damage", "v": "0.6%"}],
+        }]}],
+    }
+    with _zipfile.ZipFile(_io.BytesIO(_to_bytes(deck))) as z:
+        xml = z.read("ppt/slides/slide1.xml").decode("utf-8")
+    assert 'val="0F172A"' not in xml
+    assert 'val="F8FAFC"' not in xml
+    assert '<a:srgbClr val="F9FAFB"/>' in xml

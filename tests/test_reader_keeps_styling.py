@@ -102,3 +102,32 @@ def test_writes_what_it_read_to_the_same_slide_and_theme_parts() -> None:
     again = _parts(to_bytes(_read(_deck())))
     assert again["ppt/theme/theme1.xml"] == original["ppt/theme/theme1.xml"]
     assert again["ppt/slides/slide1.xml"] == original["ppt/slides/slide1.xml"]
+
+
+def test_reads_a_native_chart_back_as_the_echarts_option_that_writes_it() -> None:
+    option = {
+        "color": ["#38BDF8", "#F59E0B"],
+        "legend": {},
+        "xAxis": {"type": "category", "data": ["Leeds", "Bristol", "Norwich"]},
+        "yAxis": {"type": "value"},
+        "series": [
+            {"type": "bar", "name": "On-time %", "label": {"show": True},
+             "data": [96.1, 95.4, {"value": 90.7, "itemStyle": {"color": "#DC2626"}}]},
+            {"type": "bar", "name": "Target", "data": [95, 95, 95]},
+        ],
+    }
+    deck = _deck()
+    deck["slides"][0]["elements"] = [{"id": "depot-chart", "type": "chart", "x": 0.06, "y": 0.2, "w": 0.6, "h": 0.6, "option": option}]
+    el = _read(deck)["slides"][0]["elements"][0]
+    assert el["id"] == "depot-chart" and el["type"] == "chart"
+    assert el["option"]["xAxis"]["data"] == ["Leeds", "Bristol", "Norwich"]
+    assert el["option"]["series"][0]["name"] == "On-time %"
+    assert el["option"]["series"][0]["label"] == {"show": True}
+    assert el["option"]["series"][0]["data"][2] == {"value": 90.7, "itemStyle": {"color": "#DC2626"}}
+    assert "legend" in el["option"]
+
+    def chart_part(data: bytes) -> str:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            return z.read("ppt/charts/chart1.xml").decode("utf-8")
+
+    assert chart_part(to_bytes(_read(deck))) == chart_part(to_bytes(deck))

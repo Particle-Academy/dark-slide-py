@@ -95,7 +95,8 @@ def resolve(element: dict[str, Any], theme: dict[str, Any] | None = None) -> dic
     stripe_style = stripe_spec if is_plain_object(stripe_spec) else {}
 
     table_defaults: dict[str, Any] = {
-        "color": DEFAULT_BODY_COLOR,
+        # The theme's text colour, as a text box takes it. Mirrors PHP.
+        "color": _theme_color(theme, "text", DEFAULT_BODY_COLOR),
         "align": "left",
         "anchor": "middle",
         "fontSize": DEFAULT_FONT_SIZE,
@@ -127,7 +128,7 @@ def resolve(element: dict[str, Any], theme: dict[str, Any] | None = None) -> dic
         if not is_header and stripe_on:
             body_index = r - 1 if has_header else r
             if body_index % 2 == 1:
-                band_style = {**band_style, "fill": DEFAULT_STRIPE_FILL, **stripe_style}
+                band_style = {**band_style, **_stripe_defaults(theme), **stripe_style}
 
         cells = [
             _resolve_cell(
@@ -511,6 +512,41 @@ def _row_height(
 
 
 # ── Small coercions ───────────────────────────────────────────────────────
+
+
+def _stripe_defaults(theme: dict[str, Any]) -> dict[str, Any]:
+    # The stripe band: the theme's surface; on a DARK theme without one, the
+    # background blended 8% toward the text colour; otherwise the light default.
+    # Mirrors PHP TableResolver::stripeDefaults.
+    colors = theme.get("colors")
+    colors = colors if is_plain_object(colors) else {}
+    surface = colors.get("surface")
+    if isinstance(surface, str) and surface != "":
+        return {"fill": surface}
+    background = colors.get("background")
+    bg = _hex(background, "FFFFFF") if isinstance(background, str) else "FFFFFF"
+    if _luminance(bg) < 0.5:
+        text = _hex(_theme_color(theme, "text", "#F9FAFB"), "F9FAFB")
+        return {"fill": "#" + _blend(bg, text, 8)}
+    return {"fill": DEFAULT_STRIPE_FILL}
+
+
+def _luminance(h: str) -> float:
+    # Relative brightness 0..1 (Rec. 601 weights, integer channels). Mirrors PHP.
+    return (299 * int(h[0:2], 16) + 587 * int(h[2:4], 16) + 114 * int(h[4:6], 16)) / 255000
+
+
+def _blend(a: str, b: str, percent: int) -> str:
+    # a moved percent% of the way to b, per channel, truncating toward zero
+    # (PHP intdiv, not Python's floor division). Mirrors PHP.
+    out = ""
+    for i in (0, 2, 4):
+        x = int(a[i:i + 2], 16)
+        y = int(b[i:i + 2], 16)
+        d = (y - x) * percent
+        step = -((-d) // 100) if d < 0 else d // 100
+        out += "%02X" % (x + step)
+    return out
 
 
 def _theme_color(theme: dict[str, Any], key: str, fallback: str) -> str:
