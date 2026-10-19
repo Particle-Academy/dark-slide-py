@@ -1887,7 +1887,7 @@ class PptxWriter:
             f"{sers}"
             '<c:axId val="111111111"/>'
             '<c:axId val="222222222"/>'
-            "</c:barChart>" + self._build_cat_val_axes()
+            "</c:barChart>" + self._build_cat_val_axes(_non_negative(spec))
         )
 
     def _build_line_chart_xml(self, spec: ChartSpec) -> str:
@@ -1918,7 +1918,7 @@ class PptxWriter:
                 f"{sers}"
                 '<c:axId val="111111111"/>'
                 '<c:axId val="222222222"/>'
-                "</c:areaChart>" + self._build_cat_val_axes()
+                "</c:areaChart>" + self._build_cat_val_axes(_non_negative(spec))
             )
 
         return (
@@ -1993,7 +1993,7 @@ class PptxWriter:
             '<c:valAx><c:axId val="222222222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:crossAx val="111111111"/></c:valAx>'
         )
 
-    def _build_cat_val_axes(self) -> str:
+    def _build_cat_val_axes(self, zero_base: bool = False) -> str:
         return (
             "<c:catAx>"
             '<c:axId val="111111111"/>'
@@ -2008,7 +2008,7 @@ class PptxWriter:
             "</c:catAx>"
             "<c:valAx>"
             '<c:axId val="222222222"/>'
-            '<c:scaling><c:orientation val="minMax"/></c:scaling>'
+            '<c:scaling><c:orientation val="minMax"/>' + ('<c:min val="0"/>' if zero_base else "") + "</c:scaling>"
             '<c:delete val="0"/>'
             '<c:axPos val="l"/>'
             '<c:majorTickMark val="none"/>'
@@ -2680,3 +2680,9 @@ def image_mime(payload: bytes) -> str | None:
     if payload[0:2] == b"BM":
         return "image/bmp"
     return None
+
+
+def _non_negative(spec: Any) -> bool:
+    # Every plotted value is zero or more: a bar or area chart's value axis then
+    # starts at zero. Mirrors PHP PptxWriter::nonNegative.
+    return all(float(v) >= 0 for series in spec["series"] for v in (series.get("values") or []))

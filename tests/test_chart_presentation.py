@@ -122,3 +122,10 @@ def test_writes_what_it_always_did_when_the_option_names_no_colour() -> None:
     del plain["series"][0]["itemStyle"]
     plain["series"][0]["data"][3] = 90.7
     assert "<c:dPt>" not in _chart(plain)
+
+
+def test_starts_a_bar_axis_at_zero_unless_a_value_is_negative_or_it_is_a_line() -> None:
+    assert '<c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling>' in _chart(
+        {"xAxis": {"data": ["A", "B"]}, "series": [{"type": "bar", "data": [96.1, 90.7]}]})
+    assert '<c:min val="0"/>' not in _chart({"xAxis": {"data": ["A", "B"]}, "series": [{"type": "bar", "data": [3, -1]}]})
+    assert '<c:min val="0"/>' not in _chart({"xAxis": {"data": ["A", "B"]}, "series": [{"type": "line", "data": [96, 91]}]})
