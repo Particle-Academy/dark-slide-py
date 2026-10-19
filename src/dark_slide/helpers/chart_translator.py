@@ -9,6 +9,7 @@ a pre-rendered image or a titled placeholder" rather than an error.
 
 from __future__ import annotations
 
+import re
 from typing import Any, TypedDict
 
 from ..util import is_numeric, is_plain_object, is_scalar, php_float, php_string
@@ -38,6 +39,10 @@ class ChartSeries(TypedDict):
     points: list[dict[str, float]]
     #: ECharts' ``label.show``: the series' values drawn on the chart.
     labels: bool
+    #: ECharts' series ``itemStyle.color``, upper-case hex without '#'.
+    color: str | None
+    #: Points with an ``itemStyle.color`` of their own.
+    pointColors: list[dict[str, Any]]
 
 
 class ChartSpec(TypedDict):
@@ -96,7 +101,32 @@ def translate(option: Any) -> ChartSpec | None:
         "categories": categories,
         "series": series,
         "legend": _wants_legend(option),
+        "palette": _palette(option),
     }
+
+
+_HEX = re.compile(r"^#([0-9A-Fa-f]{6})$")
+
+
+def _hex_color(color: Any) -> str | None:
+    # #RRGGBB as upper-case hex without the '#', or None. Mirrors PHP hexColor.
+    match = _HEX.match(color) if isinstance(color, str) else None
+    return match.group(1).upper() if match else None
+
+
+def _item_color(holder: Any) -> str | None:
+    # itemStyle.color of a series or a data item. Mirrors PHP itemColor.
+    if not isinstance(holder, dict):
+        return None
+    style = holder.get("itemStyle")
+    return _hex_color(style.get("color")) if isinstance(style, dict) else None
+
+
+def _palette(option: dict[str, Any]) -> list[str]:
+    # option.color, ECharts' palette. Mirrors PHP ChartTranslator::palette.
+    colors = option.get("color")
+    items = colors.values() if isinstance(colors, dict) else colors if isinstance(colors, list) else []
+    return [h for h in (_hex_color(c) for c in items) if h is not None]
 
 
 def _wants_legend(option: dict[str, Any]) -> bool:
@@ -173,6 +203,12 @@ def _normalise_series(raw: dict[str, Any], series_type: str) -> ChartSeries | No
 
     values: list[float] = []
     points: list[dict[str, float]] = []
+    point_colors: list[dict[str, Any]] = []
+    if series_type != "scatter":
+        for i, point in enumerate(list(points_source)):
+            point_color = _item_color(point)
+            if point_color is not None:
+                point_colors.append({"index": i, "color": point_color})
     for point in points_source:
         if series_type == "scatter":
             xy = _scatter_point(point)
@@ -194,6 +230,9 @@ def _normalise_series(raw: dict[str, Any], series_type: str) -> ChartSeries | No
         "area": series_type == "line" and raw.get("areaStyle") is not None,
         "points": points,
         "labels": isinstance(raw.get("label"), dict) and raw["label"].get("show") is True,
+        # ECharts' itemStyle.color: the series' own colour, and a point's.
+        "color": _item_color(raw),
+        "pointColors": point_colors,
     }
 
 

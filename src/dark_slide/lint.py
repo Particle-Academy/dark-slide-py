@@ -19,6 +19,9 @@ from typing import Any
 from .helpers import design_units
 from .util import is_numeric, is_plain_object, php_float
 
+# PHP: /\*\*[^*\n]+\*\*|(^|\n)#{1,6}[ \t]/ -- ASCII only, no multiline flag.
+_LITERAL_MARKDOWN = re.compile(r"\*\*[^*\n]+\*\*|(^|\n)#{1,6}[ \t]")
+
 __all__ = ["lint_deck"]
 
 _MIN_PT = 12.0
@@ -92,6 +95,21 @@ def lint_deck(deck: Any) -> list[dict[str, Any]]:
                         f"fontSize {_num(font)} is {_num(math.floor(pt * 10) / 10)}pt on the slide: too small to "
                         f"read when projected. Use {_num(math.ceil(_MIN_PT * canvas_w / 720))} (12pt) or more.",
                     ))
+
+            # Markdown in a box that is not markdown prints its markers as typed.
+            content = el.get("content")
+            fmt = el.get("format")
+            if (
+                el_type in ("text", "shape")
+                and isinstance(content, str)
+                and (fmt if fmt is not None else "plain") != "markdown"
+                and _LITERAL_MARKDOWN.search(content)
+            ):
+                findings.append(_finding(
+                    "literal-markdown", slide_no, element_id,
+                    'This text uses markdown (**bold** or a # heading) but its format is not "markdown", '
+                    'so the markers print as typed. Set "format": "markdown", or remove the markers.',
+                ))
 
             if el_type == "kpiBand":
                 message = _kpi(el, b, canvas_w)

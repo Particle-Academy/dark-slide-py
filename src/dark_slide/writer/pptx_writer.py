@@ -168,6 +168,8 @@ class PptxWriter:
         self._media_files: list[tuple[str, bytes]] = []
         self._chart_files: list[tuple[str, str]] = []
         self._theme_accent = "8B5CF6"
+        # The chart being written's own palette (ECharts option.color), or [].
+        self._chart_palette: list[str] = []
         #: The deck's theme, kept whole so the table resolver can read its colours
         #: and ``DesignUnits`` its canvas.
         self._deck_theme: dict[str, Any] = {}
@@ -1822,6 +1824,7 @@ class PptxWriter:
         part list at the top of this file.
         """
         kind = spec["kind"]
+        self._chart_palette = list(spec.get("palette") or [])
         if kind == "line":
             plot = self._build_line_chart_xml(spec)
         elif kind == "pie":
@@ -1868,7 +1871,8 @@ class PptxWriter:
                 f'<c:idx val="{idx}"/>'
                 f'<c:order val="{idx}"/>'
                 + self._chart_series_name(series, idx)
-                + self._chart_series_fill(idx)
+                + self._chart_series_fill(idx, series)
+                + self._chart_point_colors(series, "bar")
                 + self._chart_data_labels(series, "outEnd")
                 + self._chart_cat_ref(spec["categories"], series["values"])
                 + self._chart_val_ref(series["values"])
@@ -1897,7 +1901,8 @@ class PptxWriter:
                 f'<c:idx val="{idx}"/>'
                 f'<c:order val="{idx}"/>'
                 + self._chart_series_name(series, idx)
-                + self._chart_series_line(idx)
+                + self._chart_series_line(idx, series)
+                + self._chart_point_colors(series, "area" if is_area else "line")
                 + self._chart_data_labels(series, None if is_area else "t")
                 + self._chart_cat_ref(spec["categories"], series["values"])
                 + self._chart_val_ref(series["values"])
@@ -1932,11 +1937,12 @@ class PptxWriter:
         values = series.get("values") if isinstance(series.get("values"), list) else []
         categories = spec["categories"]
 
+        own = {p["index"]: p["color"] for p in (series.get("pointColors") or [])}
         d_pts = "".join(
             "<c:dPt>"
             f'<c:idx val="{idx}"/>'
             '<c:bubble3D val="0"/>'
-            f'<c:spPr><a:solidFill><a:srgbClr val="{self._chart_color(idx)}"/></a:solidFill></c:spPr>'
+            f'<c:spPr><a:solidFill><a:srgbClr val="{own.get(idx, self._chart_color(idx))}"/></a:solidFill></c:spPr>'
             "</c:dPt>"
             for idx in range(len(values))
         )
@@ -2035,12 +2041,28 @@ class PptxWriter:
             "</c:dLbls>"
         )
 
-    def _chart_series_fill(self, idx: int) -> str:
-        return f'<c:spPr><a:solidFill><a:srgbClr val="{self._chart_color(idx)}"/></a:solidFill></c:spPr>'
+    def _chart_series_fill(self, idx: int, series: dict[str, Any] | None = None) -> str:
+        color = (series or {}).get("color") or self._chart_color(idx)
+        return f'<c:spPr><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></c:spPr>'
 
-    def _chart_series_line(self, idx: int) -> str:
+    def _chart_point_colors(self, series: dict[str, Any], shape: str) -> str:
+        # A point coloured on its own. Mirrors PHP PptxWriter::chartPointColors.
+        out = ""
+        for p in series.get("pointColors") or []:
+            solid = f'<a:solidFill><a:srgbClr val="{p["color"]}"/></a:solidFill>'
+            if shape == "line":
+                body = f'<c:marker><c:symbol val="circle"/><c:size val="7"/><c:spPr>{solid}<a:ln>{solid}</a:ln></c:spPr></c:marker><c:bubble3D val="0"/>'
+            elif shape == "area":
+                body = f'<c:bubble3D val="0"/><c:spPr>{solid}</c:spPr>'
+            else:
+                body = f'<c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr>{solid}</c:spPr>'
+            out += f'<c:dPt><c:idx val="{p["index"]}"/>' + body + "</c:dPt>"
+        return out
+
+    def _chart_series_line(self, idx: int, series: dict[str, Any] | None = None) -> str:
+        color = (series or {}).get("color") or self._chart_color(idx)
         return (
-            f'<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="{self._chart_color(idx)}"/>'
+            f'<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="{color}"/>'
             "</a:solidFill></a:ln></c:spPr>"
         )
 
@@ -2087,6 +2109,8 @@ class PptxWriter:
 
     def _chart_color(self, idx: int) -> str:
         """The theme accent for series 0, the fixed palette after that."""
+        if self._chart_palette:
+            return self._chart_palette[idx % len(self._chart_palette)]
         if idx == 0:
             return self._theme_accent
         return CHART_PALETTE[idx % len(CHART_PALETTE)]

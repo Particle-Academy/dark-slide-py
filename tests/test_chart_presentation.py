@@ -71,3 +71,54 @@ def test_a_shape_is_outlined_in_the_theme_accent_unless_it_names_a_stroke() -> N
     assert '<a:ln w="9525"><a:solidFill><a:srgbClr val="F97316"' in slide
     assert "8B5CF6" not in slide
     assert '<a:srgbClr val="000000"' in _part(deck({"stroke": "#000000"}), "ppt/slides/slide1.xml")
+
+
+# Chart colours, as ECharts states them. Mirrors PHP tests/Unit/ChartColorsTest.php.
+def _cc_bars() -> dict[str, Any]:
+    return {
+        "xAxis": {"type": "category", "data": ["Leeds", "Bristol", "Glasgow", "Norwich"]},
+        "yAxis": {"type": "value"},
+        "series": [{"type": "bar", "itemStyle": {"color": "#94A3B8"},
+                    "data": [96.1, 95.4, 93.8, {"value": 90.7, "itemStyle": {"color": "#DC2626"}}]}],
+    }
+
+
+def test_colours_a_series_and_a_single_bar_from_item_style() -> None:
+    xml = _chart(_cc_bars())
+    assert '<c:spPr><a:solidFill><a:srgbClr val="94A3B8"/></a:solidFill></c:spPr>' in xml
+    assert ('<c:dPt><c:idx val="3"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill>'
+            '<a:srgbClr val="DC2626"/></a:solidFill></c:spPr></c:dPt>') in xml
+    assert xml.index('val="94A3B8"') < xml.index("<c:dPt>") < xml.index("<c:cat>")
+
+
+def test_takes_the_palette_from_option_color() -> None:
+    xml = _chart({"color": ["#0F766E", "#F59E0B"], "xAxis": {"type": "category", "data": ["A", "B"]},
+                  "series": [{"type": "bar", "data": [1, 2]}, {"type": "bar", "data": [3, 4]}]})
+    assert '<a:srgbClr val="0F766E"/>' in xml
+    assert '<a:srgbClr val="F59E0B"/>' in xml
+    assert 'val="EC4899"' not in xml
+
+
+def test_colours_pie_slices_from_the_palette_and_from_a_slice_of_their_own() -> None:
+    xml = _chart({"color": ["#0F766E", "#CBD5E1"], "series": [{"type": "pie", "data": [
+        {"name": "Cited reconciliation", "value": 41, "itemStyle": {"color": "#C2410C"}},
+        {"name": "Other reasons", "value": 59},
+    ]}]})
+    assert '<c:dPt><c:idx val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="C2410C"/></a:solidFill></c:spPr></c:dPt>' in xml
+    assert '<c:dPt><c:idx val="1"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="CBD5E1"/></a:solidFill></c:spPr></c:dPt>' in xml
+    assert "EC4899" not in xml
+
+
+def test_colours_a_line_marker_for_a_single_point() -> None:
+    xml = _chart({"xAxis": {"type": "category", "data": ["Q1", "Q2", "Q3"]},
+                  "series": [{"type": "line", "data": [1, 2, {"value": 3, "itemStyle": {"color": "#DC2626"}}]}]})
+    assert ('<c:dPt><c:idx val="2"/><c:marker><c:symbol val="circle"/><c:size val="7"/><c:spPr><a:solidFill>'
+            '<a:srgbClr val="DC2626"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="DC2626"/></a:solidFill>'
+            '</a:ln></c:spPr></c:marker><c:bubble3D val="0"/></c:dPt>') in xml
+
+
+def test_writes_what_it_always_did_when_the_option_names_no_colour() -> None:
+    plain = _cc_bars()
+    del plain["series"][0]["itemStyle"]
+    plain["series"][0]["data"][3] = 90.7
+    assert "<c:dPt>" not in _chart(plain)

@@ -50,7 +50,12 @@ def _chart_option_json_schema() -> dict[str, Any]:
                         },
                         "data": {
                             "type": "array",
-                            "description": "The points. A bare number, or {\"value\": number}; for a pie, {\"name\": string, \"value\": number}, whose names become the category labels; for a scatter, {\"value\": [x, y]}. A point this writer cannot read makes the option untranslatable.",
+                            "description": "The points. A bare number, or {\"value\": number}; for a pie, {\"name\": string, \"value\": number}, whose names become the category labels; for a scatter, {\"value\": [x, y]}. A point this writer cannot read makes the option untranslatable. Colour ONE point to make the finding stand out -- the bar, marker or slice the slide is about: {\"value\": 90.7, \"itemStyle\": {\"color\": \"#DC2626\"}}.",
+                        },
+                        "itemStyle": {
+                            "type": "object",
+                            "description": "The series' own colour, as ECharts: {\"color\": \"#94A3B8\"} (#RRGGBB). A muted series with one highlighted point reads faster than a rainbow.",
+                            "properties": {"color": {"type": "string"}},
                         },
                         "smooth": {
                             "type": "boolean",
@@ -67,6 +72,11 @@ def _chart_option_json_schema() -> dict[str, Any]:
                         },
                     },
                 },
+            },
+            "color": {
+                "type": "array",
+                "description": "The palette, as ECharts: the colours series take in turn, slice by slice for a pie: [\"#0F766E\", \"#CBD5E1\"] (#RRGGBB). Absent, the first series takes the theme accent and the rest a stock palette whose second colour is a hot pink -- set this on a branded deck.",
+                "items": {"type": "string"},
             },
             "xAxis": {
                 "type": ["object", "array"],
