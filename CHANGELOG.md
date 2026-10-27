@@ -11,6 +11,8 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-27
+
 ### Added
 
 - **PowerPoint `.potx` templates**, matching PHP and Node dark-slide. `read()` /
