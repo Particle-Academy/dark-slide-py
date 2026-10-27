@@ -55,17 +55,18 @@ and is not what this guarantees.
 from __future__ import annotations
 
 import base64
-import io
 import os
 import math
 import re
 import struct
 import xml.etree.ElementTree as ElementTree
-import zipfile
 import zlib
 from html import unescape
 from typing import Any
 
+from ..archive import office_template
+from ..archive.source_archive import DEFAULTS as SOURCE_ARCHIVE_DEFAULTS, SourceArchive
+from ..exceptions import ArchiveRefused
 from ..helpers import emu as Emu
 from ..util import php_float
 
@@ -292,6 +293,20 @@ def _extension(path: str) -> str:
     return "" if idx < 0 else base[idx + 1 :].lower()
 
 
+def read_bounded(path: str) -> bytes:
+    """A package file, read with the archive guard's size bound before any
+    allocation past it (PHP's `SourceArchive::fromPath`). A missing file is
+    still `FileNotFoundError`, as it always was here."""
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"File not found: {path}")
+    limit = SOURCE_ARCHIVE_DEFAULTS["maxArchiveBytes"]
+    with open(path, "rb") as handle:
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        raise ArchiveRefused("archive_limit")
+    return data
+
+
 class PptxReader:
     """Read a ``.pptx`` back into the deck schema."""
 
@@ -328,11 +343,7 @@ class PptxReader:
         """
         if isinstance(data, (bytes, bytearray)):
             return self.from_bytes(bytes(data))
-        path = os.fspath(data)
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"File not found: {path}")
-        with open(path, "rb") as handle:
-            return self.from_bytes(handle.read())
+        return self.from_bytes(read_bounded(os.fspath(data)))
 
     def from_bytes(self, data: bytes) -> dict[str, Any]:
         # Everything this read returns is derived from these bytes, here or
@@ -341,16 +352,25 @@ class PptxReader:
         self._slide_number = 0
         self._slide_fallback_ids = 0
 
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                self._parts = {name: archive.read(name) for name in archive.namelist()}
-        except zipfile.BadZipFile as exc:
-            raise ValueError("Could not open zip archive.") from exc
+        # The bounded archive guard (PHP / Node SourceArchive): bombs, unsafe
+        # names, forged sizes and corrupt records are refused with
+        # ArchiveRefused (a ValueError, as a damaged zip always was here) before
+        # any part is parsed. `zipfile` had none of these limits.
+        archive = SourceArchive.open(bytes(data))
+        # Classified next: a .potm or a cross-family declaration is refused
+        # before any part is parsed.
+        source_kind = office_template.kind(archive)
+        self._parts = {name: archive.read(name) or b"" for name in archive.names()}
         deck = self._extract()
         # Stamped HERE rather than inside _extract() because _extract() has early
         # returns for a malformed package, and an id that some return paths skip
         # is worse than one that is wrong.
         deck["id"] = "imported-" + self._content_digest(deck)
+        # After the digest, deliberately: a .potx and its .pptx twin hold the
+        # same content and so read to the same id. sourceKind says what the
+        # PACKAGE was declared as, which is not content.
+        if source_kind == office_template.TEMPLATE:
+            deck["sourceKind"] = office_template.TEMPLATE
         return deck
 
     def _content_digest(self, deck: dict[str, Any]) -> str:

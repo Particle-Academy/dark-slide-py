@@ -16,7 +16,9 @@ from importlib import resources
 import os
 from typing import Any
 
+from .archive import office_template
 from .exceptions import FontEmbeddingException, SchemaException
+from .reader.pptx_reader import read_bounded
 from .fonts.embedded_fonts import EmbeddedFonts
 from .reader.pptx_reader import PptxReader
 from .schema.repairer import Repairer
@@ -150,6 +152,27 @@ def read(data: bytes | bytearray | str | os.PathLike[str]) -> dict[str, Any]:
     through; styling fidelity, masters, transitions and animations do not.
     """
     return PptxReader().read(data)
+
+
+def convert_template(
+    bytes_or_path: bytes | bytearray | str | os.PathLike[str], to: str | None = None
+) -> bytes:
+    """Turn a PowerPoint ``.potx`` template into its ``.pptx`` twin, or back.
+    ``to`` is ``"document"``, ``"template"``, or None to flip. Mirrors PHP
+    ``Agent::convertTemplate()``.
+
+    Only the main part's content-type value in ``[Content_Types].xml`` is
+    rewritten; every other member is copied as its original zip record, byte
+    for byte. Macro-enabled packages (.potm, .pptm) are refused, and so are
+    OpenDocument presentations: dark-slide does not read them.
+
+    Raises ``OfficeTemplateRefused`` and ``ArchiveRefused``.
+    """
+    if isinstance(bytes_or_path, (bytes, bytearray)):
+        data = bytes(bytes_or_path)
+    else:
+        data = read_bounded(os.fspath(bytes_or_path))
+    return office_template.convert(data, to)
 
 
 def from_bytes(data: bytes | bytearray) -> dict[str, Any]:

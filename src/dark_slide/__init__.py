@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from .agent import (
     VERSION,
+    convert_template,
     describe,
     from_bytes,
     lint,
@@ -46,7 +47,7 @@ from .agent import (
     version,
     write,
 )
-from .exceptions import FontEmbeddingException, SchemaException
+from .exceptions import ArchiveRefused, FontEmbeddingException, OfficeTemplateRefused, SchemaException
 from .reader.pptx_reader import PptxReader
 from .schema.repairer import Repairer
 from .schema.schema import Schema
@@ -74,9 +75,12 @@ __all__ = [
     "json_schema",
     "guide",
     "version",
+    "convert_template",
     # Errors.
     "SchemaException",
     "FontEmbeddingException",
+    "ArchiveRefused",
+    "OfficeTemplateRefused",
     # Lower-level building blocks, named as in the peers.
     "Schema",
     "Validator",

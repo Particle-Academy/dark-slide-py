@@ -11,6 +11,45 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+### Added
+
+- **PowerPoint `.potx` templates**, matching PHP and Node dark-slide. `read()` /
+  `PptxReader().from_bytes()` read one exactly as its `.pptx` twin and add
+  `"sourceKind": "template"`, stamped AFTER the content digest so a `.potx` and
+  its `.pptx` read to the same deck `id`. Presentation reads carry no
+  `sourceKind` key: nothing to do unless you want to tell the two apart.
+- **`convert_template(bytes_or_path, to=None)`** and a `dark-slide` script
+  (also `python -m dark_slide`): `dark-slide template:convert <in> <out>
+  [--to=document|template] [--force]`. Only the main part's content-type value
+  in `[Content_Types].xml` is rewritten; every other zip member is copied as its
+  original record, byte for byte.
+- `ArchiveRefused` and `OfficeTemplateRefused`, each with a constant `reason`.
+- OpenDocument presentations (`.otp` / `.odp`) are NOT supported: there is no
+  ODF presentation reader, so the converter refuses them as `not_convertible`.
+
+### Changed
+
+- **A macro-enabled template (`.potm`) is now refused** with
+  `OfficeTemplateRefused` reason `macro_enabled`; it used to be read with its
+  VBA silently ignored. So is a `.potx` carrying a `vbaProject.bin`. A `.pptm`
+  still reads as before but is never converted.
+- A package declaring a Word or Excel template type, or a template type on a
+  part other than `/ppt/presentation.xml`, is refused with `family_mismatch`.
+
+### Security
+
+- **The reader now goes through the same bounded archive guard as PHP and
+  Node** (`dark_slide.archive.SourceArchive`, standard library only). Before
+  this it opened packages with bare `zipfile` and read every member in full: a
+  65 MiB zero-filled member was inflated without complaint, and a `../` member
+  name was accepted. Now input over 64 MiB, a part over 64 MiB, more than 256 MiB
+  expanded, a ratio over 1000:1, more than 16,384 members, duplicate or unsafe
+  names, forged sizes or CRCs, ZIP64, encryption and inconsistent headers are
+  refused with `ArchiveRefused`. It subclasses `ValueError`, which is what a
+  damaged zip raised here before, so existing `except ValueError` handling keeps
+  working. A path read is bounded the same way before allocation. Every
+  package our writers (and LibreOffice) produce reads exactly as before.
+
 ## [0.14.0] - 2026-10-19
 
 ### Changed

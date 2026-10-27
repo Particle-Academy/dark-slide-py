@@ -35,6 +35,11 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
+[project.scripts]
+# `dark-slide template:convert <in> <out> [--to=document|template] [--force]`;
+# also `python -m dark_slide`. Standard library only, like the rest.
+dark-slide = "dark_slide.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/Particle-Academy/dark-slide-py"
 Repository = "https://github.com/Particle-Academy/dark-slide-py"

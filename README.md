@@ -144,6 +144,29 @@ Before 0.3.1 the first came from `time.time()` and the second from `random.randi
 both derived it from the package bytes, which is why 0.3.3 is the third attempt
 at one defect.
 
+### PowerPoint templates (.potx)
+
+A `.potx` is a `.pptx` whose main part is declared a template. `read()` reads
+one exactly as its twin and adds `"sourceKind": "template"` (the deck `id` is
+unchanged by it). A presentation read has no `sourceKind` key.
+
+```python
+dark_slide.read("brand.potx")["sourceKind"]   # "template"
+dark_slide.convert_template("brand.potx")     # .pptx bytes ("document" | "template" | None = flip)
+```
+
+```
+dark-slide template:convert brand.potx brand.pptx
+python -m dark_slide template:convert deck.pptx deck.potx --to=template
+```
+
+Only the content-type value in `[Content_Types].xml` changes; every other zip
+member is copied as its original record. Refused with `OfficeTemplateRefused`
+(constant `reason`): `.potm` (`macro_enabled`), another family's template
+(`family_mismatch`). The bounded archive guard runs first and raises
+`ArchiveRefused` (a `ValueError`) for bombs and unsafe names. `.otp` / `.odp`
+are not handled: there is no ODF presentation reader.
+
 ---
 
 ## Moving between runtimes
