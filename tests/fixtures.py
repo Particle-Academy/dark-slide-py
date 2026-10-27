@@ -117,6 +117,41 @@ DECKS["unicodeText"] = {
 }
 
 
+DECKS["markdownEscapes"] = {
+    # CommonMark backslash escapes through the markdown tokenizer: escaped
+    # punctuation is literal and loses its backslash; a backslash before
+    # anything else, at the end of a line, or inside a code span is kept.
+    # Mirrored in dark-slide-js's parity suite.
+    "id": "deck-escapes",
+    "title": "Escapes",
+    "metadata": META,
+    "theme": {"name": "default", "colors": {"accent": "#8B5CF6"}},
+    "slides": [
+        {
+            "id": "s1",
+            "layout": "content",
+            "elements": [
+                {
+                    "id": "e1",
+                    "type": "text",
+                    "x": 0.1,
+                    "y": 0.1,
+                    "w": 0.8,
+                    "h": 0.6,
+                    "content": (
+                        "\\*\\*not bold\\*\\* and \\`not code\\`\n"
+                        "\\# not a heading\n"
+                        "- C:\\path and a \\\\ b and \\é\n"
+                        "`a\\*b` and **x \\* y** ends\\"
+                    ),
+                    "format": "markdown",
+                },
+            ],
+        }
+    ],
+}
+
+
 DECKS["titleText"] = {
     # Markdown block + inline structure on one element: an ATX heading (which
     # gets its own size multiplier), bold and code spans, and two bullets.

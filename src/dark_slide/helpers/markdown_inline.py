@@ -5,6 +5,11 @@ straight onto drawingML ``<a:r>`` elements. Block structure — headings,
 bullets — is the caller's job; :func:`heading_prefix` and
 :func:`bullet_prefix` are the two block markers it needs.
 
+Backslash escapes follow CommonMark: a backslash before any ASCII punctuation
+character makes that character literal and is removed; a backslash before
+anything else is a literal backslash. Inside a code span a backslash is always
+literal.
+
 **String indexing.** PHP indexes this loop by BYTE and the Node port by UTF-16
 code unit; Python indexes by codepoint, which is a third scheme. All three
 agree, and the reason is worth writing down rather than trusting: every cut
@@ -39,6 +44,14 @@ def _is_word_char(ch: str) -> bool:
     return _WORD_CHAR.match(ch) is not None
 
 
+def _is_ascii_punctuation(ch: str) -> bool:
+    """CommonMark's ASCII punctuation set: codepoints 33-47, 58-64, 91-96 and
+    123-126. A non-ASCII codepoint is never in range, so a backslash before one
+    stays literal, as it does over PHP's bytes."""
+    o = ord(ch)
+    return 33 <= o <= 47 or 58 <= o <= 64 or 91 <= o <= 96 or 123 <= o <= 126
+
+
 def tokenize(text: str) -> list[InlineRun]:
     """Tokenize a single paragraph into runs.
 
@@ -66,6 +79,16 @@ def tokenize(text: str) -> list[InlineRun]:
     while i < length:
         c = text[i]
         next2 = text[i : i + 2]
+
+        # CommonMark backslash escape: before ASCII punctuation the backslash
+        # is dropped and the character is literal, so it can never open or
+        # close a span. Before anything else the backslash is itself literal
+        # and falls through below. Code spans are sliced raw, so nothing is an
+        # escape inside one.
+        if c == "\\" and i + 1 < length and _is_ascii_punctuation(text[i + 1]):
+            buf += text[i + 1]
+            i += 2
+            continue
 
         # Code spans win outright — they swallow every marker literally.
         if c == "`" and not code:
