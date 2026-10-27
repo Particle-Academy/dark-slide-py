@@ -11,6 +11,8 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-27
+
 ### Fixed
 
 - **Markdown text now honours CommonMark backslash escapes**, matching PHP
