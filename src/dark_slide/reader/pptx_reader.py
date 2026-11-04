@@ -13,9 +13,10 @@ uses ``xml.etree.ElementTree`` and matches on LOCAL names, ignoring namespace
 binding entirely — which is what the PHP XPath and the Node tree-walker both
 do in effect.
 
-**DOCTYPE is rejected before parsing.** A ``.pptx`` never legitimately carries
-one, and a document type declaration is the entry point for entity-expansion
-attacks. The input here is a file someone uploaded.
+**A DOCTYPE is refused, in every part.** A ``.pptx`` never legitimately carries
+one, and a document type declaration is the entry point for entity expansion.
+The input here is a file someone uploaded. ``archive/part_xml.py`` is the one
+place a part gets parsed.
 
 **read() is a pure function of its bytes.** The same package read twice — in
 the same second or a year apart, here or on another machine — comes back as an
@@ -65,6 +66,7 @@ from html import unescape
 from typing import Any
 
 from ..archive import office_template
+from ..archive.part_xml import is_refused, parse_xml_or_none
 from ..archive.source_archive import DEFAULTS as SOURCE_ARCHIVE_DEFAULTS, SourceArchive
 from ..exceptions import ArchiveRefused
 from ..helpers import emu as Emu
@@ -72,7 +74,6 @@ from ..util import php_float
 
 __all__ = ["PptxReader"]
 
-_DOCTYPE = re.compile(rb"<!DOCTYPE", re.IGNORECASE)
 
 def _canonicalize(value: Any, feed: Any) -> None:
     """Feed one value to the digest in a form all three engines agree on.
@@ -192,18 +193,10 @@ def _local(name: str) -> str:
     return name.rsplit("}", 1)[-1]
 
 
-def _parse_xml(xml: str) -> _Node | None:
-    """Parse to a namespace-stripped tree, or ``None`` if it will not parse.
-
-    The DOCTYPE guard runs on the raw text, before any parser sees it.
-    """
-    if _DOCTYPE.search(xml.encode("utf-8", "replace")):
-        return None
-    try:
-        root = ElementTree.fromstring(xml)
-    except ElementTree.ParseError:
-        return None
-    return _convert(root)
+def _parse_xml(xml: bytes) -> _Node | None:
+    """Parse to a namespace-stripped tree, or ``None`` if it will not parse or is refused."""
+    root = parse_xml_or_none(xml)
+    return None if root is None else _convert(root)
 
 
 def _convert(element: ElementTree.Element) -> _Node:
@@ -404,7 +397,7 @@ class PptxReader:
         built, the element is one attribute deep, and a theme part that does not
         carry the extension is the common case rather than an error.
         """
-        xml = self._get_part("ppt/theme/theme1.xml")
+        xml = self._readable_text("ppt/theme/theme1.xml")
         if xml is None:
             return ""
 
@@ -414,9 +407,15 @@ class PptxReader:
 
         return unescape(match.group(1))
 
-    def _get_part(self, name: str) -> str | None:
+    def _get_part(self, name: str) -> bytes | None:
+        return self._parts.get(name)
+
+    def _readable_text(self, name: str) -> str | None:
+        """A part read with patterns rather than parsed, which the gate still has to pass."""
         payload = self._parts.get(name)
-        return None if payload is None else payload.decode("utf-8", "replace")
+        if payload is None or is_refused(payload):
+            return None
+        return payload.decode("utf-8", "replace")
 
     def _extract(self) -> dict[str, Any]:
         deck: dict[str, Any] = {
@@ -455,7 +454,7 @@ class PptxReader:
                 self._get_part(
                     "ppt/" + _dirname(slide_target) + "/_rels/" + _basename(slide_target) + ".rels"
                 )
-                or ""
+                or b""
             )
             notes = self._read_notes_for(slide_rels)
             self._current_slide_rels = self._parse_slide_rels(slide_rels, slide_target)
@@ -477,7 +476,7 @@ class PptxReader:
         self._slide_width_emu = Emu.DEFAULT_SLIDE_WIDTH
         self._slide_height_emu = Emu.DEFAULT_SLIDE_HEIGHT
 
-        xml = self._get_part("ppt/presentation.xml")
+        xml = self._readable_text("ppt/presentation.xml")
         tag = re.search(r"<p:sldSz\b[^>]*>", xml) if xml is not None else None
         if tag is None:
             return
@@ -498,7 +497,7 @@ class PptxReader:
         """The typefaces the file embeds and which of the four variants each
         carries. Names and variants only, never the font bytes: a reader's output
         is a deck, and a deck is agent-facing JSON."""
-        xml = self._get_part("ppt/presentation.xml")
+        xml = self._readable_text("ppt/presentation.xml")
         listing = re.search(r"<p:embeddedFontLst>(.*?)</p:embeddedFontLst>", xml, re.S) if xml is not None else None
         if listing is None:
             return []
@@ -515,9 +514,9 @@ class PptxReader:
 
         return fonts
 
-    def _parse_slide_rels(self, rels_xml: str, slide_target_relative: str) -> dict[str, dict[str, str]]:
+    def _parse_slide_rels(self, rels_xml: bytes, slide_target_relative: str) -> dict[str, dict[str, str]]:
         """A slide's rels as ``{rId: {type, target}}`` with absolute targets."""
-        if rels_xml == "":
+        if rels_xml == b"":
             return {}
         root = _parse_xml(rels_xml)
         if root is None:
@@ -544,7 +543,7 @@ class PptxReader:
                 stack.append(segment)
         return "/".join(stack)
 
-    def _extract_slide_targets(self, rels_xml: str) -> list[str]:
+    def _extract_slide_targets(self, rels_xml: bytes) -> list[str]:
         root = _parse_xml(rels_xml)
         if root is None:
             return []
@@ -564,8 +563,8 @@ class PptxReader:
         title = _descendant(root, "title")
         return _deep_text(title) if title is not None else None
 
-    def _read_notes_for(self, slide_rels_xml: str) -> str | None:
-        if slide_rels_xml == "":
+    def _read_notes_for(self, slide_rels_xml: bytes) -> str | None:
+        if slide_rels_xml == b"":
             return None
         root = _parse_xml(slide_rels_xml)
         if root is None:
@@ -579,13 +578,13 @@ class PptxReader:
                 return self._parse_notes_text(notes_xml)
         return None
 
-    def _parse_notes_text(self, xml: str) -> str:
+    def _parse_notes_text(self, xml: bytes) -> str:
         root = _parse_xml(xml)
         if root is None:
             return ""
         return "\n".join(_deep_text(t) for t in _descendants(root, "t"))
 
-    def _parse_slide(self, xml: str, slide_id: str, notes: str | None) -> dict[str, Any]:
+    def _parse_slide(self, xml: bytes, slide_id: str, notes: str | None) -> dict[str, Any]:
         slide: dict[str, Any] = {"id": slide_id, "layout": "blank", "elements": []}
         if notes is not None and notes != "":
             slide["notes"] = notes

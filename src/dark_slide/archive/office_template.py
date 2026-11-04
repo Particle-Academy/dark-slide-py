@@ -39,7 +39,8 @@ import xml.etree.ElementTree as ET
 import zlib
 from typing import Any
 
-from ..exceptions import OfficeTemplateRefused
+from ..exceptions import ArchiveRefused, OfficeTemplateRefused
+from .part_xml import is_refused, parse_xml_or_none
 from .source_archive import SourceArchive
 
 DOCUMENT = "document"
@@ -110,10 +111,15 @@ def kind(archive: SourceArchive) -> str:
     read. A package that declares nothing a template would is a `document`,
     exactly as before this module existed: only templates are new.
 
-    Raises `OfficeTemplateRefused` (`macro_enabled` or `family_mismatch`).
+    Raises `OfficeTemplateRefused` (`macro_enabled` or `family_mismatch`), or
+    `ArchiveRefused` (`archive_unsupported`) for a declaration that is refused.
     """
     types = archive.read("[Content_Types].xml")
     if types is not None:
+        # Reading this as merely unparsable would make the package a plain
+        # document, and every declaration in it would go unchecked.
+        if is_refused(types):
+            raise ArchiveRefused("archive_unsupported")
         return _ooxml_kind(archive, types)
     mimetype = archive.read("mimetype") if _ODF else None
     if mimetype is not None:
@@ -355,12 +361,7 @@ def _rebuild(archive: SourceArchive, replacements: dict[str, bytes]) -> bytes:
 
 
 def _parse(xml: bytes | None) -> ET.Element | None:
-    if xml is None or xml == b"" or b"<!DOCTYPE" in xml or b"<!doctype" in xml:
-        return None
-    try:
-        return ET.fromstring(xml)
-    except ET.ParseError:
-        return None
+    return parse_xml_or_none(xml)
 
 
 def _local(tag: Any) -> str:

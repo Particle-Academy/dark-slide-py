@@ -11,6 +11,32 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+### Security
+
+- **A package whose `[Content_Types].xml` carries a `DOCTYPE` is now refused.**
+  The check on that part did not hold in every case, and a part with one was
+  otherwise treated as declaring nothing, so the checks that depend on what a
+  package declares did not run on it. Reading or converting one now raises
+  `ArchiveRefused` with reason `archive_unsupported`.
+  **What to do:** nothing, unless you catch only `OfficeTemplateRefused` around a
+  read. `ArchiveRefused` is a `ValueError`.
+- **Every XML part of a pptx now goes through one gate**, which refuses a
+  `DOCTYPE` and behaves as PHP's does. No file contents were reachable and no
+  external file was loaded. A refused part is read as absent, as a malformed one
+  always was.
+  **What to do:** upgrade if you read files you did not write. No code changes.
+
+### Fixed
+
+- **Parts encoded as UTF-16 now read.** They were decoded as UTF-8 before parsing,
+  so a slide in UTF-16 came back with no elements. PHP has always read them.
+- **A declaration in an encoding this parser cannot read no longer escapes as a
+  bare `ValueError`.** It raises `ArchiveRefused`, and any other part in such an
+  encoding reads as absent. PHP can decode some of these, so such a file reads
+  there and not here.
+- **Text that only looks like a `DOCTYPE` is no longer refused.** A slide or chart
+  title whose CDATA holds an HTML page lost its whole part. It now reads.
+
 ## [0.15.1] - 2026-10-27
 
 ### Fixed

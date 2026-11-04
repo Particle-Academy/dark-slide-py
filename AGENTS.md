@@ -87,15 +87,22 @@ ASCII byte. The `unicodeText` fixture and the `fancy-conformance`
 `shared/strings` suite pin it. Changing either tokenizer to slice differently
 would be invisible in every existing test but this one.
 
-### 4. Read XML with a parser — but reject DOCTYPE first
+### 4. Read XML with a parser — every part through one gate
 
 `reader/pptx_reader.py` uses `xml.etree.ElementTree` and matches on LOCAL names,
 ignoring namespace binding. That is fine: nothing is serialised on the read
 side, so no byte contract exists to protect.
 
-`_parse_xml` refuses any input containing `<!DOCTYPE` **before the parser sees
-it**. A `.pptx` never legitimately carries one, and the input is a file someone
-uploaded.
+**Every part is parsed through `archive/part_xml.py`, which refuses a DOCTYPE.**
+A `.pptx` never legitimately carries one, and the input is a file someone
+uploaded. A refusal looks like malformed XML, so each caller keeps its handling
+of a part it cannot read. A part read with patterns goes through
+`_readable_text`, for the same reason. The exception is `[Content_Types].xml`,
+whose declarations decide which other refusals apply: a refusal there refuses the
+package with `ArchiveRefused`. Parts reach the gate as bytes, because decoding
+first discards the encoding they declare. A test fails if `src/` parses XML
+anywhere else. Don't replace this with a search of the bytes:
+`tests/test_doctype_refusal.py` holds the cases.
 
 - **`read()` is a PURE function of its bytes**, and that is a contract rather
   than an observation. The same package read twice — in the same second or a
