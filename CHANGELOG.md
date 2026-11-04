@@ -11,6 +11,8 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-11-08
+
 ### Security
 
 - **A package whose `[Content_Types].xml` carries a `DOCTYPE` is now refused.**
