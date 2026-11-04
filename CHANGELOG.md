@@ -11,7 +11,7 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
-## [0.15.2] - 2026-11-08
+## [0.15.2] - 2026-11-04
 
 ### Security
 
