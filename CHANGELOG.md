@@ -11,6 +11,19 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+### Changed
+
+- **The agent guide (`guide()`) catches up with the PHP package's 0.20 to
+  0.22.** New: a "Reading and editing an existing deck" section (`read` /
+  `from_bytes`, charts and styled tables coming back, `describe`, `.potx`
+  templates and `convert_template`, `ArchiveRefused` as final, plus the
+  PHP-only ops and streaming), `validate_and_repair` in the build loop, and
+  markdown backslash escapes. Byte-identical to PHP and Node (new SHA-256 in
+  all three). **What to do:** nothing; guide text only, a patch.
+- Dev only: `tests/test_agent_guide_covers_the_api.py` fails when an exported
+  function of `dark_slide.agent` is not named in the guide and not on its
+  allowlist (each entry carries a reason).
+
 ## [0.15.2] - 2026-11-04
 
 ### Security

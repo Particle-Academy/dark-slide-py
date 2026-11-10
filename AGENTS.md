@@ -287,6 +287,18 @@ src/dark_slide/
                          · syntax_highlighter · chart_translator
 ```
 
+## The agent guide is shipped surface
+
+`src/dark_slide/agent_guide.md` is what `guide()` returns and what a model
+builds from, so it is part of the API. Release checklist:
+
+- [ ] guide reviewed against this release's CHANGELOG
+
+`tests/test_agent_guide_covers_the_api.py` fails on an exported `agent`
+function the guide never names; it cannot tell whether a new option or
+behaviour is described, which is what the review is for. The PHP copy is
+canonical.
+
 ## Running the suite
 
 ```

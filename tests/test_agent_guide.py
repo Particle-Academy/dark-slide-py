@@ -10,7 +10,7 @@ import hashlib
 
 from dark_slide import guide
 
-AGENT_GUIDE_SHA256 = "48f3697a2c9705e2c78d52948b7bf16431df0fc29d618b1e1c71ded11902e466"
+AGENT_GUIDE_SHA256 = "f84b567dfaf8ffacb166a7fde593722826f61eaa36fa5826d279d87bc4525324"
 
 
 def test_returns_the_guide_and_it_is_the_shared_one() -> None:
