@@ -11,6 +11,8 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-11-10
+
 ### Changed
 
 - **The agent guide (`guide()`) catches up with the PHP package's 0.20 to
