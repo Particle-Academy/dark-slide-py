@@ -11,6 +11,13 @@ number cannot make a promise the 0.x range does not allow it to keep.
 
 ## [Unreleased]
 
+### Changed
+
+- **Releases need a lab-run certificate.** `publish.yml` gains a read-only
+  `lab-certificate` job that every publishing job needs: a tag is published only
+  when the fancy-labs lab has certified that exact version and commit. Consumers
+  do nothing; this changes how releases are cut, not what the package does.
+
 ## [0.15.3] - 2026-11-10
 
 ### Changed
@@ -704,7 +711,6 @@ derive the deck id the same way, so any two of them read one file to the same id
 
 - **The conformance pin moved from 0.20.0 to 0.21.2.** fancy-conformance 0.21.x shipped while this port still pinned 0.20.0, so its own guard test was red against the fixture checkout CI uses. All three tables were re-run first: `shared/strings` 8, `shared/decimal` 18, `dark-slide/table-cell-model` 26, nothing failed or skipped.
 
-
 ## [0.2.0] - 2026-09-10
 
 Rich document constructs: per-cell table control, decorated text boxes,
@@ -814,7 +820,6 @@ Six changes alter emitted bytes. Five need nothing from you; one can.
 - **`version()` reports the version the package actually ships as.** It returned
   `0.1.0` from `0.2.0`. `test_version_is_single_sourced.py` has asserted this
   since it was written; the release preflight is what stood at it.
-
 
 - **`theme.fonts.mono` now reaches the code it names.** It was accepted by the
   validator, published in the JSON Schema handed to an LLM as the tool
