@@ -75,9 +75,15 @@ import fancy_conformance as loader
 # dark-slide/table-cell-model 33, nothing failed or skipped. Eleven releases of
 # fixtures passed between the two pins; every intervening suite ran clean here.
 #
+# Moved 0.34.0 -> 0.49.0 on 2026-11-17. Between the two tags only
+# shared/strings changed for the suites this port runs (six cases added, 8 -> 14);
+# dark-slide/table-cell-model and shared/decimal are unchanged. Re-run first
+# against the v0.49.0 suites: shared/strings 14, shared/decimal 18,
+# dark-slide/table-cell-model 33, nothing failed or skipped.
+#
 # CI checks out `ref: v<this>` from .github/workflows/ci.yml. Move the two
 # together; test_ci_checks_out_the_fixture_tag_this_suite_pins fails otherwise.
-PINNED_SUITE_VERSION = "0.34.0"
+PINNED_SUITE_VERSION = "0.49.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk(
