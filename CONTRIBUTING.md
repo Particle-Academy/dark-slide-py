@@ -7,7 +7,7 @@ works in this repo.
 
 This file describes **this repository's code**: its API, its invariants, and the
 traps in it. Process rules — release lifecycle, publishing, version policy,
-backports — live in the envelope's `AGENTS.md` and must never be copied here; a
+backports — live in the envelope's `RULES.md` and must never be copied here; a
 copy on a maintenance branch would freeze a rule that has since changed, with
 nothing to flag it.
 
