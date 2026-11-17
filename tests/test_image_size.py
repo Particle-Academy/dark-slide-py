@@ -3,7 +3,7 @@
 Intrinsic pixel dimensions decide ``fit: cover``'s crop insets and
 ``fit: contain``'s letterbox, so a sniffer that disagrees with PHP produces
 different geometry from the same deck. This port hand-rolls the sniffer rather
-than taking an imaging dependency (see AGENTS.md), which makes "it matches
+than taking an imaging dependency (see CONTRIBUTING.md), which makes "it matches
 PHP" a claim — so this file turns it into a test result by running PHP's
 builtin over the same bytes.
 

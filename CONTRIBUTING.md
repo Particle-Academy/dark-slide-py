@@ -1,0 +1,317 @@
+# Contributing to fancy-dark-slide (Python)
+
+Notes for anyone, human or agent, working ON this package's code. How to USE the
+package is in [AGENTS.md](./AGENTS.md); what it is, is in [README.md](./README.md).
+`CLAUDE.md` is a symlink to this file, so Claude Code reads these notes when it
+works in this repo.
+
+This file describes **this repository's code**: its API, its invariants, and the
+traps in it. Process rules — release lifecycle, publishing, version policy,
+backports — live in the envelope's `AGENTS.md` and must never be copied here; a
+copy on a maintenance branch would freeze a rule that has since changed, with
+nothing to flag it.
+
+## What this is
+
+A `.pptx` writer + reader with **no runtime dependencies, permanently**. It is
+one of three engines that must produce the same document from the same deck:
+
+| | |
+|---|---|
+| PHP | `particle-academy/dark-slide` — **the reference** |
+| Node | `@particle-academy/dark-slide` |
+| Python | this repo |
+
+The deck model is plain `dict`s and the `Validator` is the gate. `schema/types.py`
+holds `TypedDict`s for editor support only; nothing enforces them at runtime, and
+nothing should. Loose agent JSON is the *input format*, and
+`validate_and_repair()` exists to rescue it.
+
+## The invariant everything else serves
+
+> **`to_bytes()` must emit byte-identical OOXML parts to the PHP engine.**
+
+`tests/test_parity_php.py` runs the PHP writer as a subprocess and diffs every
+part for every fixture. That is the definition of done for any writer change.
+It follows that:
+
+- **Never build XML with `ElementTree` on the write side.** Attribute order,
+  self-closing style, and the absence of inter-element whitespace are all part
+  of the output. `helpers/xml.py` is an escaper, not a serialiser, and the
+  writer concatenates strings.
+- **`helpers/xml.text` and `helpers/xml.attr` escape different sets**, and the
+  asymmetry is load-bearing: `text` leaves the apostrophe alone, `attr` writes
+  `&apos;` (the `ENT_XML1` entity — *not* `&#039;`, whatever a spec says;
+  the parity suite checks it against the engine).
+- **Which parts exist is contract.** No `notesMasters/`, no `presProps.xml`, no
+  `tableStyles.xml`. All eight `slideLayout` parts always ship. Notes parts are
+  numbered by SLIDE, so the sequence has gaps.
+- **The zip container is NOT compared and never can be.** PHP writes DEFLATE
+  with real mtimes through `ZipArchive`; this writes STORE with a fixed
+  1980-01-01 DOS date. The comparison unzips both and diffs parts, which is the
+  real contract anyway — a reader sees parts, never the compression.
+
+## Traps
+
+### 1. `round()` is the wrong function here. Always.
+
+Python rounds half to **even**; PHP rounds half **away from zero**. Every
+coordinate in every deck is `round(fraction * 9144000)`, so this is not a corner
+case — it is a one-EMU shift in thousands of attributes.
+
+Use `helpers.emu.php_round`. Nothing in the package may call the builtin, and
+`test_no_module_in_the_package_calls_the_builtin_round` parses the AST to prove
+it. The `roundingTies` fixture pins two real ties (`3/128 × 9144000` and
+`3/8 × 5143500`, both exactly `.5` over an even integer) against the oracle.
+
+The one exception is documented at its site: `_num_str`'s `"%.6f"` is safe
+because **no IEEE-754 double is an exact tie at six decimal places** — that
+would require `5·10⁻⁷` to be a dyadic rational, and it is not — so the rounding
+mode cannot matter there.
+
+### 2. PHP's loose types are reproduced on purpose (`util.py`)
+
+Five of them change emitted bytes, and Python's instincts are wrong on all five:
+
+- `php_string(True)` is `"1"`, `php_string(12.0)` is `"12"`, and
+  `php_string(1/3)` is `"0.33333333333333"` (precision 14, not `repr`).
+- `php_truthy("0")` is **False**. A slide whose `notes` is `"0"` gets no notes
+  part; `bool("0")` would give it one.
+- `is_numeric` follows PHP: `"1e5"` is numeric and worth 100000, `" 12 "` is
+  numeric with whitespace on both ends.
+- `php_float("12abc")` is `12.0`, not an error.
+- `php_json_encode` uses compact separators and escapes `/` as `\/`.
+
+### 3. String indexing is a THIRD scheme, and it agrees by accident
+
+PHP indexes the markdown tokenizer and the syntax highlighter by **byte**; the
+Node port by **UTF-16 code unit**; Python by **codepoint**. All three agree, and
+the reason is worth keeping in mind before any "tidy": every cut is at an ASCII
+marker, and no UTF-8 continuation byte or UTF-16 surrogate half can equal an
+ASCII byte. The `unicodeText` fixture and the `fancy-conformance`
+`shared/strings` suite pin it. Changing either tokenizer to slice differently
+would be invisible in every existing test but this one.
+
+### 4. Read XML with a parser — every part through one gate
+
+`reader/pptx_reader.py` uses `xml.etree.ElementTree` and matches on LOCAL names,
+ignoring namespace binding. That is fine: nothing is serialised on the read
+side, so no byte contract exists to protect.
+
+**Every part is parsed through `archive/part_xml.py`, which refuses a DOCTYPE.**
+A `.pptx` never legitimately carries one, and the input is a file someone
+uploaded. A refusal looks like malformed XML, so each caller keeps its handling
+of a part it cannot read. A part read with patterns goes through
+`_readable_text`, for the same reason. The exception is `[Content_Types].xml`,
+whose declarations decide which other refusals apply: a refusal there refuses the
+package with `ArchiveRefused`. Parts reach the gate as bytes, because decoding
+first discards the encoding they declare. A test fails if `src/` parses XML
+anywhere else. Don't replace this with a search of the bytes:
+`tests/test_doctype_refusal.py` holds the cases.
+
+- **`read()` is a PURE function of its bytes**, and that is a contract rather
+  than an observation. The same package read twice — in the same second or a
+  year apart, on any machine — returns an identical structure, down to every
+  generated id, because consumers store reads and DIFF them: one clock- or
+  RNG-derived field turns a diff of unchanged content into a whole-deck replace.
+  The deck id is CRC-32 over a canonical encoding of the deck itself; an element
+  whose `<p:cNvPr>` carries no `name` is numbered by its position in the file.
+  (Our own writer names every `<p:cNvPr>` the reader consults — measured across
+  10 fixtures and 27 such nodes — so our decks never reach that fallback; files
+  from other producers are what reach it.) Nothing on the read
+  side may put the clock, a random number or the environment into a returned
+  value. Guarded by `tests/test_reader_is_pure.py`.
+
+  Both parity suites used to DELETE the deck id before comparing, so neither
+  could see this — a comparison that drops the field it cannot explain asserts
+  nothing about it, and all three engines had the same bug, which a suite that
+  only detects disagreement will never report.
+
+  **The id is a digest of the CONTENT, and that took three releases to get
+  right.** 0.3.1 hashed the whole package, so it followed the writer's clock.
+  0.3.2 excluded the clock-bearing `docProps/core.xml`, which removed ONE source
+  of byte variance and left the rest — a deck with a shape or a code block
+  re-serialises to different `ppt/slides/slideN.xml` bytes, so the id still moved
+  while the structure sat perfectly still. Bytes were simply the wrong basis: a
+  digest of bytes identifies a SERIALISATION, and no exclusion list makes two
+  serialisations of one deck byte-equal.
+
+  **The canonical encoding is a cross-engine contract, not an implementation
+  detail.** Three engines must digest one structure to one value, so the encoding
+  is written out in full in each reader and must be changed in all three at once.
+  The traps it exists to close: number TYPE differs by language (`int/int` is an
+  int in PHP, always a float in Python, always a double in JS) and float
+  RENDERING depends on PHP's `serialize_precision` ini, so numbers go in as raw
+  IEEE-754 bits; PHP cannot tell an empty list from an empty map, so both
+  collapse to one marker; keys are sorted, and every key a read deck contains is
+  machine-generated ASCII, which the purity suite CHECKS rather than assumes.
+
+  **`tests/pptx/foreign-libreoffice.pptx` is the first `.pptx` fixture any of the three repos
+  ever had.** Every other fixture is written by our own writer at test time,
+  which is one blind spot shared by all three — the reader's RNG path went
+  unexercised the same way. It is produced with LibreOffice; regenerate it with
+  the command in the purity suite's docblock.
+
+### 5. `allow_http_images` defaults to `False`, and stays that way
+
+Fetching a URL named inside a document is an SSRF surface. `data:` URIs,
+`file://` and local paths work unconditionally; `http(s)` needs
+`{"allow_http_images": True}` from the caller. The `imageFallback` fixture
+asserts the default emits an `[image: …]` placeholder and makes no request.
+
+### 6. Determinism is required, so the clock is an INPUT
+
+`test_determinism.py` asserts byte stability, and `fancy-conformance` treats a
+determinism flag as a precondition for a writer suite. So this port reads
+`metadata.created` / `metadata.modified` when the deck supplies them and falls
+back to `EPOCH_TIMESTAMP` otherwise. That is the ONE entry in
+`KNOWN_DIVERGENT_PARTS`, and it names the reason.
+
+**Corrected 2026-10-07 (dark-slide#10).** This entry used to say PHP "offers no
+way to pin it". That was true when written and is not now: PHP and Node read the
+SAME two keys as of dark-slide 0.14.0 / 0.12.0, with the same
+`modified`-falls-back-to-`created` rule, because `to_bytes()` embedding the clock
+unconditionally meant two calls a second apart produced different bytes and a
+content-addressed store saw a change that was not one.
+
+**What still diverges is only the DEFAULT**: PHP and Node fall back to their
+clock, this port to the sentinel. So `KNOWN_DIVERGENT_PARTS` stays, and so does
+the Node suite's mask — but they now cover a documented difference in a default
+rather than a field one engine could not control. A deck that supplies both keys
+is byte-identical across all three, which it never could be before, and
+`test_writer_timestamp.py` pins every part of that in each engine.
+
+Pinning the shared fixtures' timestamps would let the entry and the mask go
+entirely. Not done: it changes a fixture three parity suites compare on, and the
+masked field is now a known default rather than a blind spot.
+
+### 7. The rel-id collision is reproduced, not fixed
+
+Image relationship ids come from a **global** media counter, while a slide's
+own rels start at `rId1` = layout and `rId2` = notesSlide. So one image on one
+slide already emits two `<Relationship Id="rId1">` entries. Relationship ids
+must be unique within a part, so the package is malformed — and every `.pptx`
+with an image that any of the three engines has ever written carries it.
+
+**Do not fix it here.** Fixing one engine alone breaks part-level parity, which
+is the only cross-runtime guarantee the trio has; the ruling is one coordinated
+release across every engine. The allocation site carries a `RULING PENDING:`
+comment, the `imageRelIds` fixture pins the current bytes, and
+`tests/test_relationship_id_collision.py` asserts the defect is still present —
+so the day the engines are fixed together, it fails and gets deleted.
+
+### 8. Python never casts a deciding vote on an open ruling
+
+Where the PHP and Node engines already disagree, **this port follows PHP**, so
+the tally stays 2-1 in the direction already recorded rather than becoming a
+three-way split. The live ones, all with tests:
+
+| Behaviour | PHP (and this port) | Node |
+|---|---|---|
+| `chart.mode` default | `"png"` — a pre-rendered `data:` image wins over a translatable `option` | always tries native translation first |
+| `{"id": null}` in the validator | no error (`isset()` is false for null) | flagged as a type error |
+| non-base64 `data:` URIs | percent-decoded to **bytes** | re-encoded as UTF-8, corrupting binary |
+| intrinsic size of a WebP / BMP | read, so `fit: cover` crops correctly | unread, so it stretches |
+
+**A row left this table on 2026-10-07** — `option.categories` with no `xAxis`.
+It was recorded as *"a shared wart, pinned"* with Node marked `same`, and **that
+was never true**: Node honoured it, because its candidate list is seeded `null`
+where PHP and this port seeded `[]`, and `[]` is already an array so the fallback
+never fired. A real three-way split on a silent path, invisible because the
+reference deck carries NO CHART and byte parity therefore never reaches the
+translator.
+
+The owner ruled that the two engines ignoring it should match Node, which is what
+PHP's own docblock had promised all along. All three honour it as of dark-slide
+0.13.0 / 0.11.0 / 0.6.0, the schema publishes it, and each engine has a test.
+**The lesson to keep is about the table, not the row: a divergence ledger with a
+wrong entry is worse than no ledger**, because it is the one place someone checks
+before trusting the trio. Measure a row before recording it, and re-measure
+before citing it.
+
+### 9. Every length is a design pixel, converted in ONE place
+
+`helpers/design_units.to_pt()` is `px * 720 / design_width`, where `design_width`
+is `theme.slideWidth` (1920 by default) and 720 is the 10in slide in points.
+`fontSize: 96` is 36pt, 5% of the slide width in PowerPoint and fancy-slides alike.
+
+- It applies to every AUTHORED length: `fontSize` (floor 1pt), `strokeWidth`,
+  `letterSpacing`, `spaceBefore` / `spaceAfter`, `padding`, `radius` (text boxes
+  AND `rounded-rect` shapes, through the shared `round_rect_geometry`), border and
+  accent-bar widths, table row heights, and the composites' own defaults.
+- It does NOT apply to PowerPoint-native defaults nobody authored: the 7.2pt /
+  3.6pt insets, a 1pt box outline, a 0.75pt table rule, 40pt / 30pt minimum rows,
+  a 4pt accent bar, the 8pt gutter.
+- **Keep the operation order.** The default canvas lands on exact ties (1px =
+  0.375pt = 4762.5 EMU), where `php_round` and a different multiplication order
+  can disagree by one unit. `designLengths1920` in the parity fixtures and the
+  `dark-slide/table-cell-model` conformance rows pin them.
+- `theme.aspectRatio` shapes the slide height (`design_units.slide_height_emu`),
+  so every Y conversion takes `self._slide_height_emu`, never the 16:9 default;
+  the reader parses `<p:sldSz>` for the same reason.
+- A roundRect corner is `min(w, h) * adj / 100000` (LibreOffice's preset table).
+  It used to divide by HALF the shorter side.
+
+**Until 0.3 this was a halving** (`fontSize / 2`, 8pt floor) with every other
+length taken as points. `theme.slideWidth: 1440` reproduces it exactly.
+
+### 10. Embedded fonts (`fonts/`)
+
+Opt-in through the write options (`{"fonts": {typeface: {variant: path | bytes}}}`),
+never through the deck: an agent names a face, the host supplies the licensed file.
+
+- **`.fntdata` is an EOT, not a `.ttf`**, uncompressed, and byte-identical to the
+  PHP engine's header (charset 1, NUL-terminated UTF-16LE names).
+  `test_embedded_fonts_emit_the_same_parts` compares the parts as BYTES; changing
+  the charset byte alone turns it red.
+- **Refusals match PHP's text exactly** and are collected and raised together as
+  `FontEmbeddingException` before anything is written. Two PHP-isms are
+  reproduced on purpose: the family check is `strcasecmp` after `trim`, i.e. an
+  ASCII case fold over UTF-8 bytes, and a name record is decoded the way
+  `Utf16::beToUtf8` does it, keeping an unpaired surrogate instead of raising.
+- **No font supplied means no byte changes.** `embedTrueTypeFonts="1"` replaces
+  `saveSubsetFonts="1"` only when a font is embedded.
+- **PowerPoint and Google Slides are not verified.** The opt-in render test
+  (`DARK_SLIDE_RENDER=1`) checks the output through LibreOffice.
+- Tests build their own TrueType font (`tests/generated_font.py`), byte-identical
+  to PHP's `tests/Support/GeneratedFont`, so no third-party font is committed.
+
+## Layout
+
+```
+src/dark_slide/
+  __init__.py            the public façade
+  agent.py               the Agent surface as module-level functions
+  exceptions.py          SchemaException (the structured error list) · FontEmbeddingException
+  fonts/                 true_type_font · embedded_open_type (EOT) · embedded_fonts (options -> parts)
+  util.py                PHP loose-typing semantics, written down once
+  schema/                schema.py · validator.py · repairer.py · types.py
+  writer/pptx_writer.py  string building; the byte contract lives here
+  reader/pptx_reader.py  ElementTree; best-effort, degrades rather than raises
+  helpers/               xml · color · emu (php_round) · design_units · markdown_inline
+                         · syntax_highlighter · chart_translator
+```
+
+## The agent guide is shipped surface
+
+`src/dark_slide/agent_guide.md` is what `guide()` returns and what a model
+builds from, so it is part of the API. Release checklist:
+
+- [ ] guide reviewed against this release's CHANGELOG
+
+`tests/test_agent_guide_covers_the_api.py` fails on an exported `agent`
+function the guide never names; it cannot tell whether a new option or
+behaviour is described, which is what the review is for. The PHP copy is
+canonical.
+
+## Running the suite
+
+```
+PHP_BIN='/path/to/php' python -m pytest
+```
+
+`pythonpath = ["src"]` is set, so a bare checkout with nothing but pytest runs
+it. **A missing PHP is a skip locally and a hard failure under `CI`** — a
+parity suite that quietly stops comparing anything reads exactly like one that
+compares everything, which is how two sibling suites reported green over zero
+coverage for months.
