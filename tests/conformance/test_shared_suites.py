@@ -83,7 +83,7 @@ import fancy_conformance as loader
 #
 # CI checks out `ref: v<this>` from .github/workflows/ci.yml. Move the two
 # together; test_ci_checks_out_the_fixture_tag_this_suite_pins fails otherwise.
-PINNED_SUITE_VERSION = "0.49.0"
+PINNED_SUITE_VERSION = "0.62.0"
 
 
 def test_the_pinned_fixture_version_is_the_one_on_disk(

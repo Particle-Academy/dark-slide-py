@@ -24,6 +24,7 @@ number cannot make a promise the 0.x range does not allow it to keep.
 - Rebranded the display name to Fancy Dev Kit (README and package description). Package names, the npm scope, URLs and the `fancy-ui` MCP id are unchanged.
 - **Docs:** `AGENTS.md` is now the guide to using this package (install, its entries on the Fancy MCP catalog server, API essentials, traps). The contributor notes it held moved to `CONTRIBUTING.md`, and `CLAUDE.md` is now a symlink to it. The README points to the MCP server and to `AGENTS.md`. No code changed; nothing to do.
 - CI: re-pin org third-party allowlist to 2614224
+- Conformance fixtures 0.62.0: the `shared/strings`, `shared/decimal` and `dark-slide/table-cell-model` rows are now pinned at fancy-conformance 0.62.0 (was 0.49.0), in the CI checkout ref and `PINNED_SUITE_VERSION`. Test-only; no runtime change, nothing to do.
 
 ### Fixed
 
